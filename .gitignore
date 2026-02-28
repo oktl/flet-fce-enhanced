@@ -10,3 +10,9 @@ wheels/
 .venv
 
 # IDE files
+.vscode/
+.idea/
+
+# Flet Code Editor Enhanced specific
+*.fcebackup
+dev/

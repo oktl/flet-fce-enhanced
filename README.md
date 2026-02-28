@@ -1,6 +1,6 @@
 # flet-code-editor-enhanced
 
-An enhanced [Flet](https://flet.dev) CodeEditor with file open/save/save-as/close capabilities.
+An enhanced [Flet](https://flet.dev) CodeEditor control with file open/save/save-as/close capabilities.
 
 Built on top of [`flet-code-editor`](https://pypi.org/project/flet-code-editor/), adding a toolbar for common file operations and native macOS file dialogs.
 
