@@ -12,6 +12,7 @@ import flet_code_editor as fce
 
 from flet_code_editor_enhanced.file_dialog import open_file, save_file
 from flet_code_editor_enhanced.languages import language_for_path
+from flet_code_editor_enhanced.search import SearchReplaceBar
 
 DEFAULT_CODE = """\
 # New file
@@ -113,6 +114,15 @@ class EnhancedCodeEditor(ft.Column):
             expand=True,
         )
 
+        # --- Search bar ---
+        self._search_bar = SearchReplaceBar(
+            get_text=lambda: self._code_editor.value or "",
+            set_selection=self._set_editor_selection,
+            replace_text=self._apply_replace_text,
+            focus_editor=self._focus_editor,
+            on_close=self._on_search_closed,
+        )
+
         # --- Build layout ---
         controls = []
 
@@ -147,10 +157,17 @@ class EnhancedCodeEditor(ft.Column):
                             tooltip="Close (⌘W)",
                             on_click=self._handle_close,
                         ),
+                        ft.Button(
+                            "Find",
+                            icon=ft.Icons.SEARCH,
+                            tooltip="Find (⌘F)",
+                            on_click=self._handle_find_click,
+                        ),
                     ],
                 )
             )
 
+        controls.append(self._search_bar)
         controls.append(self._code_editor)
 
         if show_status_bar:
@@ -304,6 +321,12 @@ class EnhancedCodeEditor(ft.Column):
         self._code_editor.language = language_for_path(path)
         self._mark_clean(content)
         await self._code_editor.focus()
+        await asyncio.sleep(0.05)
+        self._code_editor.selection = ft.TextSelection(base_offset=0, extent_offset=0)
+        try:
+            self._code_editor.update()
+        except RuntimeError:
+            pass
 
     async def _do_save(self) -> bool:
         """Save to current_path. Returns True if saved, False if cancelled."""
@@ -358,13 +381,62 @@ class EnhancedCodeEditor(ft.Column):
         self.update()
         await self._code_editor.focus()
 
+    # --- Search / Replace ---
+
+    @property
+    def search_bar(self) -> SearchReplaceBar:
+        """The search/replace bar control."""
+        return self._search_bar
+
+    def _set_editor_selection(self, base: int, extent: int) -> None:
+        self._code_editor.selection = ft.TextSelection(
+            base_offset=base, extent_offset=extent
+        )
+        try:
+            self._code_editor.update()
+        except RuntimeError:
+            pass
+
+    def _focus_editor(self) -> None:
+        try:
+            asyncio.ensure_future(self._code_editor.focus())
+        except RuntimeError:
+            pass
+
+    def _apply_replace_text(self, new_text: str) -> None:
+        self._code_editor.value = new_text
+
+    async def _handle_find_click(self, _e) -> None:
+        await self._open_search(with_replace=False)
+
+    async def _open_search(self, *, with_replace: bool = False) -> None:
+        self._search_bar.open(with_replace=with_replace)
+        self.page.update()
+        await self._search_bar.focus_search()
+
+    def _close_search(self) -> None:
+        self._search_bar.close()
+        self.page.update()
+
+    def _on_search_closed(self) -> None:
+        """Called by SearchReplaceBar.close() — just update layout, don't call close again."""
+        self.page.update()
+
     # --- Keyboard shortcuts ---
 
     async def _handle_keyboard(self, e: ft.KeyboardEvent):
+        if e.key == "Escape" and self._search_bar.is_open:
+            self._close_search()
+            return
+
         if not (e.meta or e.ctrl):
             return
         key = e.key.upper()
-        if key == "S" and not e.shift:
+        if key == "F":
+            await self._open_search(with_replace=False)
+        elif key == "H":
+            await self._open_search(with_replace=True)
+        elif key == "S" and not e.shift:
             await self._do_save()
         elif key == "S" and e.shift:
             await self._do_save_as()
@@ -403,6 +475,10 @@ class EnhancedCodeEditor(ft.Column):
             self._dirty = False
             self._save_btn.disabled = True
             self._update_title()
+
+        if self._search_bar.is_open:
+            self._search_bar.recompute()
+            self._search_bar._safe_update()
 
 
 def main(page: ft.Page):

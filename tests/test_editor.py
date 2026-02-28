@@ -7,6 +7,7 @@ import flet_code_editor as fce
 import pytest
 
 from flet_code_editor_enhanced.editor import DEFAULT_CODE, EnhancedCodeEditor
+from flet_code_editor_enhanced.search import SearchReplaceBar
 
 
 # --- Helpers ---
@@ -108,6 +109,7 @@ def test_toolbar_shown_by_default():
     assert "Save" in button_labels
     assert "Save As" in button_labels
     assert "Close" in button_labels
+    assert "Find" in button_labels
 
 
 def test_toolbar_hidden():
@@ -406,5 +408,115 @@ async def test_handle_close_resets_state():
         assert editor.dirty is False
         assert editor.value == DEFAULT_CODE
         assert editor.language == fce.CodeLanguage.PYTHON
+    finally:
+        _cleanup_patches(p1, p2, p3)
+
+
+# --- Search bar integration ---
+
+
+def test_search_bar_exists():
+    editor = _make_editor()
+    assert isinstance(editor.search_bar, SearchReplaceBar)
+
+
+def test_search_bar_in_layout():
+    editor = _make_editor()
+    assert editor._search_bar in editor.controls
+
+
+def test_search_bar_initially_hidden():
+    editor = _make_editor()
+    assert editor._search_bar.is_open is False
+    assert editor._search_bar.controls == []
+
+
+def test_search_bar_available_without_toolbar():
+    editor = _make_editor(show_toolbar=False)
+    assert isinstance(editor.search_bar, SearchReplaceBar)
+    assert editor._search_bar in editor.controls
+
+
+@pytest.mark.asyncio
+async def test_ctrl_f_opens_search():
+    editor = _make_editor()
+    _, p1, p2, p3 = _patch_page(editor)
+    focus_patch = patch.object(
+        editor._search_bar._search_field, "focus", new_callable=AsyncMock
+    )
+    focus_patch.start()
+    try:
+        event = MagicMock(spec=ft.KeyboardEvent)
+        event.key = "F"
+        event.meta = True
+        event.ctrl = False
+        event.shift = False
+
+        await editor._handle_keyboard(event)
+
+        assert editor._search_bar.is_open is True
+        assert editor._search_bar._replace_row.visible is False
+    finally:
+        focus_patch.stop()
+        _cleanup_patches(p1, p2, p3)
+
+
+@pytest.mark.asyncio
+async def test_ctrl_h_opens_search_with_replace():
+    editor = _make_editor()
+    _, p1, p2, p3 = _patch_page(editor)
+    focus_patch = patch.object(
+        editor._search_bar._search_field, "focus", new_callable=AsyncMock
+    )
+    focus_patch.start()
+    try:
+        event = MagicMock(spec=ft.KeyboardEvent)
+        event.key = "H"
+        event.meta = True
+        event.ctrl = False
+        event.shift = False
+
+        await editor._handle_keyboard(event)
+
+        assert editor._search_bar.is_open is True
+        assert editor._search_bar._replace_row.visible is True
+    finally:
+        focus_patch.stop()
+        _cleanup_patches(p1, p2, p3)
+
+
+@pytest.mark.asyncio
+async def test_escape_closes_search():
+    editor = _make_editor()
+    _, p1, p2, p3 = _patch_page(editor)
+    try:
+        editor._search_bar.open()
+
+        event = MagicMock(spec=ft.KeyboardEvent)
+        event.key = "Escape"
+        event.meta = False
+        event.ctrl = False
+        event.shift = False
+
+        await editor._handle_keyboard(event)
+
+        assert editor._search_bar.is_open is False
+    finally:
+        _cleanup_patches(p1, p2, p3)
+
+
+def test_handle_change_recomputes_search():
+    editor = _make_editor(value="hello world hello")
+    _, p1, p2, p3 = _patch_page(editor)
+    try:
+        editor._search_bar.open()
+        editor._search_bar._search_query = "hello"
+        editor._search_bar.recompute()
+        assert len(editor._search_bar._match_positions) == 2
+
+        # Simulate text change via _handle_change
+        editor._code_editor.value = "hello world"
+        editor._handle_change(None)
+        assert len(editor._search_bar._match_positions) == 1
     finally:
         _cleanup_patches(p1, p2, p3)
