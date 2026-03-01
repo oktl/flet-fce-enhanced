@@ -59,6 +59,7 @@ dependencies = [
     { name = "flet" },
     { name = "flet-code-editor" },
     { name = "loguru" },
+    { name = "pre-commit" },
 ]
 
 [package.dev-dependencies]
@@ -73,6 +74,7 @@ requires-dist = [
     { name = "flet", specifier = ">=0.81.0" },
     { name = "flet-code-editor", specifier = ">=0.81.0" },
     { name = "loguru", specifier = ">=0.7" },
+    { name = "pre-commit", specifier = ">=4.5.1" },
 ]
 
 [package.metadata.requires-dev]
