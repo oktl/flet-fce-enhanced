@@ -520,3 +520,234 @@ def test_handle_change_recomputes_search():
         assert len(editor._search_bar._match_positions) == 1
     finally:
         _cleanup_patches(p1, p2, p3)
+
+
+# --- Ruff on save ---
+
+
+def _mock_ruff_process(returncode=0, stderr=b""):
+    """Create a mock subprocess that returns immediately."""
+    proc = MagicMock()
+    proc.returncode = returncode
+    proc.communicate = AsyncMock(return_value=(b"", stderr))
+    return proc
+
+
+@pytest.mark.asyncio
+async def test_ruff_runs_on_python_save(tmp_path):
+    editor = _make_editor(ruff_on_save=True)
+    _, p1, p2, p3 = _patch_page(editor)
+    try:
+        filepath = tmp_path / "test.py"
+        filepath.write_text("x=1\n", encoding="utf-8")
+        editor._current_path = str(filepath)
+        editor._code_editor.value = "x=1\n"
+        editor._mark_dirty()
+
+        mock_proc = _mock_ruff_process()
+        with (
+            patch("shutil.which", return_value="/usr/bin/ruff"),
+            patch(
+                "asyncio.create_subprocess_exec",
+                new_callable=AsyncMock,
+                return_value=mock_proc,
+            ) as mock_exec,
+        ):
+            await editor._do_save()
+            # Should have called ruff check --fix and ruff format
+            assert mock_exec.call_count == 2
+            args_list = [call.args for call in mock_exec.call_args_list]
+            assert args_list[0] == ("/usr/bin/ruff", "check", "--fix", str(filepath))
+            assert args_list[1] == ("/usr/bin/ruff", "format", str(filepath))
+    finally:
+        _cleanup_patches(p1, p2, p3)
+
+
+@pytest.mark.asyncio
+async def test_ruff_skips_non_python_files(tmp_path):
+    editor = _make_editor(ruff_on_save=True)
+    _, p1, p2, p3 = _patch_page(editor)
+    try:
+        filepath = tmp_path / "test.js"
+        filepath.write_text("let x = 1;\n", encoding="utf-8")
+        editor._current_path = str(filepath)
+        editor._code_editor.value = "let x = 1;\n"
+
+        with (
+            patch("shutil.which", return_value="/usr/bin/ruff"),
+            patch(
+                "asyncio.create_subprocess_exec", new_callable=AsyncMock
+            ) as mock_exec,
+        ):
+            await editor._run_ruff(str(filepath))
+            mock_exec.assert_not_called()
+    finally:
+        _cleanup_patches(p1, p2, p3)
+
+
+@pytest.mark.asyncio
+async def test_ruff_skips_when_disabled(tmp_path):
+    editor = _make_editor(ruff_on_save=False)
+    _, p1, p2, p3 = _patch_page(editor)
+    try:
+        filepath = tmp_path / "test.py"
+        filepath.write_text("x=1\n", encoding="utf-8")
+
+        with (
+            patch("shutil.which", return_value="/usr/bin/ruff"),
+            patch(
+                "asyncio.create_subprocess_exec", new_callable=AsyncMock
+            ) as mock_exec,
+        ):
+            await editor._run_ruff(str(filepath))
+            mock_exec.assert_not_called()
+    finally:
+        _cleanup_patches(p1, p2, p3)
+
+
+@pytest.mark.asyncio
+async def test_ruff_skips_when_not_installed(tmp_path):
+    editor = _make_editor(ruff_on_save=True)
+    _, p1, p2, p3 = _patch_page(editor)
+    try:
+        filepath = tmp_path / "test.py"
+        filepath.write_text("x=1\n", encoding="utf-8")
+
+        with (
+            patch("shutil.which", return_value=None),
+            patch(
+                "asyncio.create_subprocess_exec", new_callable=AsyncMock
+            ) as mock_exec,
+        ):
+            await editor._run_ruff(str(filepath))
+            mock_exec.assert_not_called()
+    finally:
+        _cleanup_patches(p1, p2, p3)
+
+
+@pytest.mark.asyncio
+async def test_ruff_updates_editor_content(tmp_path):
+    editor = _make_editor(ruff_on_save=True)
+    _, p1, p2, p3 = _patch_page(editor)
+    try:
+        filepath = tmp_path / "test.py"
+        editor._current_path = str(filepath)
+        editor._code_editor.value = "x=1\n"
+        filepath.write_text("x=1\n", encoding="utf-8")
+
+        mock_proc = _mock_ruff_process()
+        call_count = 0
+
+        async def write_formatted(*args, **kwargs):
+            """Simulate ruff reformatting the file on the format call."""
+            nonlocal call_count
+            call_count += 1
+            if call_count == 2:  # ruff format is the second call
+                filepath.write_text("x = 1\n", encoding="utf-8")
+            return mock_proc
+
+        with (
+            patch("shutil.which", return_value="/usr/bin/ruff"),
+            patch(
+                "asyncio.create_subprocess_exec",
+                side_effect=write_formatted,
+            ),
+        ):
+            await editor._run_ruff(str(filepath))
+            assert editor._code_editor.value == "x = 1\n"
+            assert editor._last_saved_content == "x = 1\n"
+    finally:
+        _cleanup_patches(p1, p2, p3)
+
+
+@pytest.mark.asyncio
+async def test_ruff_check_failure_does_not_block_format(tmp_path):
+    """ruff check exits non-zero for unfixable violations — format should still run."""
+    editor = _make_editor(ruff_on_save=True)
+    _, p1, p2, p3 = _patch_page(editor)
+    try:
+        filepath = tmp_path / "test.py"
+        filepath.write_text("x=1\n", encoding="utf-8")
+
+        mock_proc = _mock_ruff_process(returncode=1, stderr=b"lint warnings")
+        with (
+            patch("shutil.which", return_value="/usr/bin/ruff"),
+            patch(
+                "asyncio.create_subprocess_exec",
+                new_callable=AsyncMock,
+                return_value=mock_proc,
+            ) as mock_exec,
+        ):
+            await editor._run_ruff(str(filepath))
+            # Both check and format should be called
+            assert mock_exec.call_count == 2
+    finally:
+        _cleanup_patches(p1, p2, p3)
+
+
+@pytest.mark.asyncio
+async def test_ruff_check_warnings_shown_in_snackbar(tmp_path):
+    """Remaining lint warnings after --fix are shown to the user."""
+    editor = _make_editor(ruff_on_save=True)
+    _, p1, p2, p3 = _patch_page(editor)
+    try:
+        filepath = tmp_path / "test.py"
+        filepath.write_text("x=1\n", encoding="utf-8")
+
+        check_output = b"test.py:1:1: F841 Local variable `x` is assigned but never used\nFound 1 error.\n"
+        check_proc = _mock_ruff_process(returncode=1, stderr=b"")
+        check_proc.communicate = AsyncMock(return_value=(check_output, b""))
+        fmt_proc = _mock_ruff_process(returncode=0)
+
+        call_count = 0
+
+        async def side_effect(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            return check_proc if call_count == 1 else fmt_proc
+
+        with (
+            patch("shutil.which", return_value="/usr/bin/ruff"),
+            patch("asyncio.create_subprocess_exec", side_effect=side_effect),
+        ):
+            await editor._run_ruff(str(filepath))
+
+        # A snackbar should have been added to the page overlay
+        snackbars = [s for s in editor.page.overlay if isinstance(s, ft.SnackBar)]
+        assert len(snackbars) == 1
+        assert "F841" in snackbars[0].content.value
+        assert "Found 1" not in snackbars[0].content.value  # summary filtered out
+    finally:
+        _cleanup_patches(p1, p2, p3)
+
+
+@pytest.mark.asyncio
+async def test_ruff_format_failure_bails_out(tmp_path):
+    """If ruff format fails, we bail and don't reload the file."""
+    editor = _make_editor(ruff_on_save=True)
+    _, p1, p2, p3 = _patch_page(editor)
+    try:
+        filepath = tmp_path / "test.py"
+        filepath.write_text("x=1\n", encoding="utf-8")
+        editor._code_editor.value = "x=1\n"
+        editor._last_saved_content = "x=1\n"
+
+        ok_proc = _mock_ruff_process(returncode=0)
+        fail_proc = _mock_ruff_process(returncode=1, stderr=b"format error")
+
+        call_count = 0
+
+        async def side_effect(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            return ok_proc if call_count == 1 else fail_proc
+
+        with (
+            patch("shutil.which", return_value="/usr/bin/ruff"),
+            patch("asyncio.create_subprocess_exec", side_effect=side_effect),
+        ):
+            await editor._run_ruff(str(filepath))
+            # Editor content should be unchanged
+            assert editor._code_editor.value == "x=1\n"
+    finally:
+        _cleanup_patches(p1, p2, p3)

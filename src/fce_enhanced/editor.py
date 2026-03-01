@@ -5,10 +5,12 @@ https://docs.flet.dev/codeeditor/ with added file I/O toolbar.
 """
 
 import asyncio
+import shutil
 from pathlib import Path
 
 import flet as ft
 import flet_code_editor as fce
+from loguru import logger
 
 from fce_enhanced.file_dialog import open_file, save_file
 from fce_enhanced.languages import language_for_path
@@ -42,6 +44,8 @@ class EnhancedCodeEditor(ft.Column):
         gutter_style: Style for the line number gutter.
         on_title_change: Callback fired with (display_path, name, is_dirty) when
             the file title or dirty state changes.
+        ruff_on_save: Run ruff check --fix and ruff format on Python files
+            after saving. Requires ruff to be installed. Defaults to True.
     """
 
     def __init__(
@@ -57,6 +61,7 @@ class EnhancedCodeEditor(ft.Column):
         text_style: ft.TextStyle | None = None,
         gutter_style: fce.GutterStyle | None = None,
         on_title_change=None,
+        ruff_on_save: bool = True,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -64,6 +69,7 @@ class EnhancedCodeEditor(ft.Column):
         # --- Configuration ---
         self._register_keyboard_shortcuts = register_keyboard_shortcuts
         self.on_title_change = on_title_change
+        self._ruff_on_save = ruff_on_save
 
         # --- State ---
         self._current_path: str | None = None
@@ -334,6 +340,78 @@ class EnhancedCodeEditor(ft.Column):
         except RuntimeError:
             pass
 
+    def _show_snackbar(self, message: str, *, is_error: bool = False) -> None:
+        """Show a message to the user via a SnackBar with a dismiss button."""
+        snack = ft.SnackBar(
+            ft.Text(message, color=ft.Colors.WHITE, selectable=True),
+            bgcolor=ft.Colors.RED_800 if is_error else ft.Colors.GREY_800,
+            action="Dismiss",
+            duration=86400000,  # effectively permanent until dismissed
+        )
+        self.page.overlay.append(snack)
+        snack.open = True
+        self.page.update()
+
+    async def _run_ruff(self, path: str) -> None:
+        """Run ruff check --fix and ruff format on a saved Python file.
+
+        Silently skips if ruff is not installed or the file is not Python.
+        Updates the editor content with the formatted result.
+        Shows remaining warnings to the user via a snackbar.
+        """
+        if not self._ruff_on_save:
+            return
+        if not path.endswith(".py"):
+            return
+        ruff = shutil.which("ruff")
+        if ruff is None:
+            logger.debug("ruff not found on PATH, skipping post-save formatting")
+            return
+
+        # ruff check --fix applies auto-fixes but exits non-zero if
+        # unfixable violations remain — that's normal, so don't bail out.
+        check_proc = await asyncio.create_subprocess_exec(
+            ruff,
+            "check",
+            "--fix",
+            path,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        check_stdout, _ = await check_proc.communicate()
+
+        # Show remaining lint warnings to the user
+        check_output = check_stdout.decode().strip()
+        if check_proc.returncode != 0 and check_output:
+            # Strip the "Found N errors" summary, keep the actual violations
+            lines = [
+                ln for ln in check_output.splitlines() if not ln.startswith("Found ")
+            ]
+            if lines:
+                self._show_snackbar(f"Ruff: {'; '.join(lines)}", is_error=True)
+
+        # Run formatter
+        fmt_proc = await asyncio.create_subprocess_exec(
+            ruff,
+            "format",
+            path,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _, fmt_stderr = await fmt_proc.communicate()
+        if fmt_proc.returncode != 0:
+            msg = fmt_stderr.decode().strip()
+            logger.warning("ruff format failed: {}", msg)
+            self._show_snackbar(f"Ruff format failed: {msg}", is_error=True)
+            return
+
+        # Reload formatted content into editor
+        formatted = Path(path).read_text(encoding="utf-8")
+        if formatted != self._code_editor.value:
+            self._code_editor.value = formatted
+            self._last_saved_content = formatted
+            self.update()
+
     async def _do_save(self) -> bool:
         """Save to current_path. Returns True if saved, False if cancelled."""
         if self._current_path is None:
@@ -342,6 +420,7 @@ class EnhancedCodeEditor(ft.Column):
         content = self._code_editor.value or ""
         Path(self._current_path).write_text(content, encoding="utf-8")
         self._mark_clean(content)
+        await self._run_ruff(self._current_path)
         return True
 
     async def _do_save_as(self) -> bool:
@@ -358,6 +437,7 @@ class EnhancedCodeEditor(ft.Column):
         Path(path).write_text(content, encoding="utf-8")
         self._code_editor.language = language_for_path(path)
         self._mark_clean(content)
+        await self._run_ruff(path)
         return True
 
     async def _handle_save(self, _e):

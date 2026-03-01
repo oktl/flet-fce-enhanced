@@ -13,6 +13,7 @@ dependencies = [
     "flet-code-editor>=0.81.0",
     "loguru>=0.7",
     "pre-commit>=4.5.1",
+    "ruff>=0.15.4",
 ]
 
 [project.scripts]
