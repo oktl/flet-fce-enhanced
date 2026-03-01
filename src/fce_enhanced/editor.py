@@ -18,6 +18,10 @@ DEFAULT_CODE = """\
 # New file
 """
 
+BUTTON_STYLE = ft.ButtonStyle(text_style=ft.TextStyle(size=12))
+APPBAR_HEIGHT = 18
+ICON_SIZE = 16
+
 
 class EnhancedCodeEditor(ft.Column):
     """A reusable Flet control that wraps CodeEditor with file I/O toolbar.
@@ -88,14 +92,14 @@ class EnhancedCodeEditor(ft.Column):
             )
 
         # --- UI elements ---
-        self._title_bar = ft.Text("untitled", size=12, expand=True)
+        self._title_bar = ft.Text("untitled", size=12, color=ft.Colors.GREY_600)
         self._status_bar = ft.Text(
             "Ln 1, Col 1 | Python", size=12, color=ft.Colors.GREY_600
         )
 
-        self._save_btn = ft.Button(
-            "Save",
-            icon=ft.Icons.SAVE,
+        self._save_btn = ft.IconButton(
+            ft.Icons.SAVE,
+            icon_size=ICON_SIZE,
             tooltip="Save (⌘S)",
             on_click=self._handle_save,
             disabled=True,
@@ -126,48 +130,50 @@ class EnhancedCodeEditor(ft.Column):
         # --- Build layout ---
         controls = []
 
+        appbar = ft.Row(
+            controls=[
+                # Each button here is a direct command
+                ft.IconButton(
+                    ft.Icons.FILE_OPEN,
+                    icon_size=ICON_SIZE,
+                    tooltip="Open (⌘O)",
+                    on_click=self._handle_open,
+                ),
+                self._save_btn,
+                ft.IconButton(
+                    ft.Icons.SAVE_AS,
+                    icon_size=ICON_SIZE,
+                    tooltip="Save As (⇧⌘S)",
+                    on_click=self._handle_save_as,
+                ),
+                ft.IconButton(
+                    ft.Icons.CLOSE,
+                    icon_size=ICON_SIZE,
+                    tooltip="Close File (⌘W) ",
+                    on_click=self._handle_close,
+                ),
+                ft.IconButton(
+                    ft.Icons.SEARCH,
+                    icon_size=ICON_SIZE,
+                    tooltip="Find (⌘F)",
+                    on_click=self._handle_find_click,
+                ),
+                self.search_bar,
+            ],
+        )
+
+        controls.append(appbar)
+        controls.append(ft.Divider(height=1, color=ft.Colors.GREY_800))
         controls.append(
             ft.Row(
                 alignment=ft.MainAxisAlignment.CENTER,
-                controls=[self._title_bar],
+                controls=[
+                    ft.Text("File: ", size=12, color=ft.Colors.GREY_600),
+                    self._title_bar,
+                ],
             )
         )
-
-        if show_toolbar:
-            controls.append(
-                ft.Row(
-                    spacing=10,
-                    controls=[
-                        ft.Button(
-                            "Open",
-                            icon=ft.Icons.FOLDER_OPEN,
-                            tooltip="Open (⌘O)",
-                            on_click=self._handle_open,
-                        ),
-                        self._save_btn,
-                        ft.Button(
-                            "Save As",
-                            icon=ft.Icons.SAVE_AS,
-                            tooltip="Save As (⇧⌘S)",
-                            on_click=self._handle_save_as,
-                        ),
-                        ft.Button(
-                            "Close",
-                            icon=ft.Icons.CLOSE,
-                            tooltip="Close (⌘W)",
-                            on_click=self._handle_close,
-                        ),
-                        ft.Button(
-                            "Find",
-                            icon=ft.Icons.SEARCH,
-                            tooltip="Find (⌘F)",
-                            on_click=self._handle_find_click,
-                        ),
-                    ],
-                )
-            )
-
-        controls.append(self._search_bar)
+        # controls.append(self._search_bar)
         controls.append(self._code_editor)
 
         if show_status_bar:
@@ -493,6 +499,9 @@ def main(page: ft.Page):
         expand=True,
         on_title_change=_on_title_change,
     )
+    # page.add(
+    #     appbar
+    #     )
     page.add(editor)
 
 

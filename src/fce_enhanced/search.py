@@ -7,6 +7,8 @@ from collections.abc import Callable
 
 import flet as ft
 
+BUTTON_STYLE = ft.ButtonStyle(text_style=ft.TextStyle(size=10))
+
 
 class SearchReplaceBar(ft.Column):
     """A search/replace bar that communicates with an editor via callbacks.
@@ -48,13 +50,14 @@ class SearchReplaceBar(ft.Column):
         self._search_field = ft.TextField(
             hint_text="Find",
             dense=True,
-            expand=True,
+            width=200,
             text_size=13,
             content_padding=ft.Padding.symmetric(horizontal=8, vertical=4),
-            border_color=ft.Colors.GREY_600,
-            focused_border_color=ft.Colors.GREY_400,
+            border_color=ft.Colors.GREY_800,
+            focused_border_color=ft.Colors.GREY_600,
             on_change=self._handle_search_change,
             on_submit=self._handle_next,
+            border_width=0.5,
         )
 
         self._match_count_label = ft.Text(
@@ -72,11 +75,12 @@ class SearchReplaceBar(ft.Column):
         self._replace_field = ft.TextField(
             hint_text="Replace",
             dense=True,
-            expand=True,
+            width=200,
             text_size=13,
             content_padding=ft.Padding.symmetric(horizontal=8, vertical=4),
             border_color=ft.Colors.GREY_800,
             focused_border_color=ft.Colors.GREY_600,
+            border_width=0.5,
         )
 
         self._replace_toggle_btn = ft.IconButton(
@@ -90,10 +94,14 @@ class SearchReplaceBar(ft.Column):
             spacing=4,
             visible=False,
             controls=[
-                ft.Container(width=32),  # spacer to align with search field
+                ft.Container(width=40),  # spacer to align with search field
                 self._replace_field,
-                ft.TextButton("Replace", on_click=self._handle_replace_one),
-                ft.TextButton("Replace All", on_click=self._handle_replace_all),
+                ft.TextButton(
+                    "Replace", on_click=self._handle_replace_one, style=BUTTON_STYLE
+                ),
+                ft.TextButton(
+                    "Replace All", on_click=self._handle_replace_all, style=BUTTON_STYLE
+                ),
             ],
         )
 
