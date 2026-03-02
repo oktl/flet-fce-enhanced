@@ -221,7 +221,6 @@ class EnhancedCodeEditor(ft.Column):
                 ],
             )
         )
-        # controls.append(self._search_bar)
         controls.append(self._code_editor)
 
         if show_status_bar:
@@ -922,9 +921,7 @@ def main(page: ft.Page):
         expand=True,
         on_title_change=_on_title_change,
     )
-    # page.add(
-    #     appbar
-    #     )
+
     page.add(editor)
 
 
