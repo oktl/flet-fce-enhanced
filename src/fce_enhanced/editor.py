@@ -190,7 +190,6 @@ class EnhancedCodeEditor(ft.Column):
                     tooltip="Go to Line (⌘G)",
                     on_click=self._handle_goto_line,
                 ),
-                self.search_bar,
                 self._lock_btn,
                 ft.VerticalDivider(width=1),
                 ft.IconButton(
@@ -210,6 +209,7 @@ class EnhancedCodeEditor(ft.Column):
         )
 
         controls.append(appbar)
+        controls.append(self._search_bar)
         controls.append(ft.Divider(height=1, color=ft.Colors.GREY_800))
         controls.append(
             ft.Row(
