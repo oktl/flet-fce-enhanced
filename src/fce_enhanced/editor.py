@@ -118,6 +118,12 @@ class EnhancedCodeEditor(ft.Column):
         self._font_size_label = ft.Text(
             f"{self._font_size}px", size=11, color=ft.Colors.GREY_600
         )
+        self._lock_btn = ft.IconButton(
+            ft.Icons.LOCK_OPEN,
+            icon_size=ICON_SIZE,
+            tooltip="Toggle Read-Only (⌘L)",
+            on_click=lambda _e: self._toggle_read_only(),
+        )
 
         self._code_editor = fce.CodeEditor(
             language=language,
@@ -198,6 +204,8 @@ class EnhancedCodeEditor(ft.Column):
                     tooltip="Increase Font Size (⌘+)",
                     on_click=lambda _e: self._change_font_size(1),
                 ),
+                ft.VerticalDivider(width=1),
+                self._lock_btn,
             ],
         )
 
@@ -581,6 +589,17 @@ class EnhancedCodeEditor(ft.Column):
         self._font_size_label.value = f"{new_size}px"
         self.update()
 
+    # --- Read-only toggle ---
+
+    def _toggle_read_only(self) -> None:
+        read_only = not self._code_editor.read_only
+        self._code_editor.read_only = read_only
+        self._lock_btn.icon = ft.Icons.LOCK if read_only else ft.Icons.LOCK_OPEN
+        self._lock_btn.tooltip = (
+            "Unlock Editing (⌘L)" if read_only else "Toggle Read-Only (⌘L)"
+        )
+        self.update()
+
     # --- Search / Replace ---
 
     @property
@@ -717,6 +736,8 @@ class EnhancedCodeEditor(ft.Column):
             self._change_font_size(1)
         elif key == "MINUS" or key == "-":
             self._change_font_size(-1)
+        elif key == "L":
+            self._toggle_read_only()
 
     # --- Status bar ---
 
