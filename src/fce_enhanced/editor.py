@@ -5,6 +5,7 @@ https://docs.flet.dev/codeeditor/ with added file I/O toolbar.
 """
 
 import asyncio
+import platform
 import shutil
 from pathlib import Path
 
@@ -576,6 +577,118 @@ class EnhancedCodeEditor(ft.Column):
         self.page.update()
         self.update()
 
+    # --- Command palette ---
+
+    async def _open_command_palette(self):
+        """Show a searchable command palette dialog (Cmd+Shift+P / Ctrl+Shift+P)."""
+        is_mac = platform.system() == "Darwin"
+        mod = "⌘" if is_mac else "Ctrl+"
+        shift_mod = "⇧⌘" if is_mac else "Ctrl+Shift+"
+        commands = [
+            ("Open File", f"{mod}O", self._handle_open),
+            ("Save", f"{mod}S", self._handle_save),
+            ("Save As", f"{shift_mod}S", self._handle_save_as),
+            ("Close File", f"{mod}W", self._handle_close),
+            ("Find", f"{mod}F", lambda _: self._open_search(with_replace=False)),
+            (
+                "Find and Replace",
+                f"{mod}H",
+                lambda _: self._open_search(with_replace=True),
+            ),
+            ("Go to Line", f"{mod}G", self._handle_goto_line),
+            ("Choose Theme", "", self._handle_theme_click),
+            ("Toggle Read-Only", f"{mod}L", lambda _: self._toggle_read_only()),
+            ("Increase Font Size", f"{mod}+", lambda _: self._change_font_size(1)),
+            ("Decrease Font Size", f"{mod}-", lambda _: self._change_font_size(-1)),
+        ]
+
+        chosen: list[int | None] = [None]
+        cancelled: list[bool] = [False]
+
+        def _build_tiles(cmds):
+            tiles = []
+            for i, (name, shortcut, _handler) in enumerate(cmds):
+                tiles.append(
+                    ft.ListTile(
+                        title=ft.Text(name, size=14),
+                        trailing=ft.Text(shortcut, size=12, color=ft.Colors.GREY_500)
+                        if shortcut
+                        else None,
+                        on_click=lambda _e, idx=i: _select(idx),
+                    )
+                )
+            return tiles
+
+        def _select(idx):
+            chosen[0] = idx
+            dlg.open = False
+            self.page.update()
+
+        def _dismiss(_e):
+            cancelled[0] = True
+            dlg.open = False
+            self.page.update()
+
+        # Filtered command list (indices into `commands`)
+        filtered: list[int] = list(range(len(commands)))
+
+        cmd_list = ft.ListView(
+            height=300,
+            controls=_build_tiles(commands),
+        )
+
+        def _filter(e):
+            q = (e.control.value or "").lower()
+            filtered.clear()
+            filtered.extend(
+                i for i, (name, _s, _h) in enumerate(commands) if q in name.lower()
+            )
+            cmd_list.controls = [
+                ft.ListTile(
+                    title=ft.Text(commands[i][0], size=14),
+                    trailing=ft.Text(commands[i][1], size=12, color=ft.Colors.GREY_500)
+                    if commands[i][1]
+                    else None,
+                    on_click=lambda _e, idx=i: _select(idx),
+                )
+                for i in filtered
+            ]
+            self.page.update()
+
+        dlg = ft.AlertDialog(
+            title=ft.Text("Command Palette", size=14),
+            content=ft.Column(
+                [
+                    ft.TextField(
+                        hint_text="Type a command...",
+                        prefix_icon=ft.Icons.SEARCH,
+                        autofocus=True,
+                        on_change=_filter,
+                    ),
+                    cmd_list,
+                ],
+                tight=True,
+                width=350,
+            ),
+            on_dismiss=_dismiss,
+        )
+
+        self.page.overlay.append(dlg)
+        dlg.open = True
+        self.page.update()
+
+        while chosen[0] is None and not cancelled[0]:
+            await asyncio.sleep(0.05)
+
+        self.page.overlay.remove(dlg)
+        self.page.update()
+
+        if chosen[0] is not None:
+            handler = commands[chosen[0]][2]
+            result = handler(None)
+            if asyncio.iscoroutine(result):
+                await result
+
     # --- Read-only toggle ---
 
     def _toggle_read_only(self) -> None:
@@ -718,7 +831,9 @@ class EnhancedCodeEditor(ft.Column):
         if not (e.meta or e.ctrl):
             return
         key = e.key.upper()
-        if key == "F":
+        if key == "P" and e.shift:
+            await self._open_command_palette()
+        elif key == "F":
             await self._open_search(with_replace=False)
         elif key == "H":
             await self._open_search(with_replace=True)
