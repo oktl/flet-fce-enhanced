@@ -24,6 +24,9 @@ DEFAULT_CODE = """\
 BUTTON_STYLE = ft.ButtonStyle(text_style=ft.TextStyle(size=12))
 APPBAR_HEIGHT = 18
 ICON_SIZE = 16
+DEFAULT_FONT_SIZE = 13
+MIN_FONT_SIZE = 8
+MAX_FONT_SIZE = 32
 
 
 class EnhancedCodeEditor(ft.Column):
@@ -84,8 +87,12 @@ class EnhancedCodeEditor(ft.Column):
             code_theme if isinstance(code_theme, fce.CodeTheme) else None
         )
 
+        self._font_size = text_style.size if text_style else DEFAULT_FONT_SIZE
+
         if text_style is None:
-            text_style = ft.TextStyle(font_family="monospace", height=1.2, size=13)
+            text_style = ft.TextStyle(
+                font_family="monospace", height=1.2, size=self._font_size
+            )
 
         if gutter_style is None:
             gutter_style = fce.GutterStyle(
@@ -107,6 +114,9 @@ class EnhancedCodeEditor(ft.Column):
             tooltip="Save (⌘S)",
             on_click=self._handle_save,
             disabled=True,
+        )
+        self._font_size_label = ft.Text(
+            f"{self._font_size}px", size=11, color=ft.Colors.GREY_600
         )
 
         self._code_editor = fce.CodeEditor(
@@ -173,6 +183,20 @@ class EnhancedCodeEditor(ft.Column):
                     icon_size=ICON_SIZE,
                     tooltip="Go to Line (⌘G)",
                     on_click=self._handle_goto_line,
+                ),
+                ft.VerticalDivider(width=1),
+                ft.IconButton(
+                    ft.Icons.REMOVE,
+                    icon_size=ICON_SIZE,
+                    tooltip="Decrease Font Size (⌘-)",
+                    on_click=lambda _e: self._change_font_size(-1),
+                ),
+                self._font_size_label,
+                ft.IconButton(
+                    ft.Icons.ADD,
+                    icon_size=ICON_SIZE,
+                    tooltip="Increase Font Size (⌘+)",
+                    on_click=lambda _e: self._change_font_size(1),
                 ),
             ],
         )
@@ -544,6 +568,19 @@ class EnhancedCodeEditor(ft.Column):
         self.page.update()
         self.update()
 
+    # --- Font size ---
+
+    def _change_font_size(self, delta: int) -> None:
+        new_size = max(MIN_FONT_SIZE, min(MAX_FONT_SIZE, self._font_size + delta))
+        if new_size == self._font_size:
+            return
+        self._font_size = new_size
+        self._code_editor.text_style = ft.TextStyle(
+            font_family="monospace", height=1.2, size=new_size
+        )
+        self._font_size_label.value = f"{new_size}px"
+        self.update()
+
     # --- Search / Replace ---
 
     @property
@@ -676,6 +713,10 @@ class EnhancedCodeEditor(ft.Column):
             await self._handle_close(None)
         elif key == "G":
             await self._handle_goto_line(None)
+        elif key == "EQUAL" or key == "+" or key == "=":
+            self._change_font_size(1)
+        elif key == "MINUS" or key == "-":
+            self._change_font_size(-1)
 
     # --- Status bar ---
 
