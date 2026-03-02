@@ -168,11 +168,17 @@ class EnhancedCodeEditor(ft.Column):
                     tooltip="Find (⌘F)",
                     on_click=self._handle_find_click,
                 ),
-                self.search_bar,
+                ft.IconButton(
+                    ft.Icons.FORMAT_LIST_NUMBERED,
+                    icon_size=ICON_SIZE,
+                    tooltip="Go to Line (⌘G)",
+                    on_click=self._handle_goto_line,
+                ),
             ],
         )
 
         controls.append(appbar)
+        controls.append(self._search_bar)
         controls.append(ft.Divider(height=1, color=ft.Colors.GREY_800))
         controls.append(
             ft.Row(
@@ -183,7 +189,6 @@ class EnhancedCodeEditor(ft.Column):
                 ],
             )
         )
-        # controls.append(self._search_bar)
         controls.append(self._code_editor)
 
         if show_status_bar:
@@ -580,6 +585,73 @@ class EnhancedCodeEditor(ft.Column):
         """Called by SearchReplaceBar.close() — just update layout, don't call close again."""
         self.page.update()
 
+    # --- Go to Line ---
+
+    async def _handle_goto_line(self, _e):
+        """Show a dialog prompting for a line number, then jump to that line."""
+        result: list[int | None] = [None]
+        cancelled: list[bool] = [False]
+        content = self._code_editor.value or ""
+        max_lines = content.count("\n") + 1
+
+        line_field = ft.TextField(
+            label=f"Line number (1–{max_lines})",
+            keyboard_type=ft.KeyboardType.NUMBER,
+            autofocus=True,
+            text_size=13,
+            label_style=ft.TextStyle(size=12),
+            dense=True,
+            content_padding=ft.padding.symmetric(horizontal=8, vertical=4),
+        )
+
+        def _go(_e):
+            try:
+                val = int(line_field.value)
+            except (TypeError, ValueError):
+                return
+            if 1 <= val <= max_lines:
+                result[0] = val
+                dlg.open = False
+                self.page.update()
+
+        def _cancel(_e):
+            cancelled[0] = True
+            dlg.open = False
+            self.page.update()
+
+        dlg = ft.AlertDialog(
+            modal=True,
+            title=ft.Text("Go to Line", size=14),
+            content=ft.Column([line_field], tight=True, width=200),
+            actions=[
+                ft.TextButton("Cancel", on_click=_cancel, style=BUTTON_STYLE),
+                ft.TextButton("Go", on_click=_go, style=BUTTON_STYLE),
+            ],
+            actions_alignment=ft.MainAxisAlignment.END,
+            content_padding=ft.padding.symmetric(horizontal=20, vertical=8),
+            actions_padding=ft.padding.only(right=12, bottom=8),
+        )
+        self.page.overlay.append(dlg)
+        dlg.open = True
+        self.page.update()
+
+        while result[0] is None and not cancelled[0]:
+            await asyncio.sleep(0.05)
+
+        self.page.overlay.remove(dlg)
+        self.page.update()
+
+        if result[0] is not None:
+            offset = self._line_to_offset(content, result[0])
+            self._code_editor.selection = ft.TextSelection(
+                base_offset=offset, extent_offset=offset
+            )
+            try:
+                self._code_editor.update()
+            except RuntimeError:
+                pass
+            await self._code_editor.focus()
+
     # --- Keyboard shortcuts ---
 
     async def _handle_keyboard(self, e: ft.KeyboardEvent):
@@ -602,6 +674,8 @@ class EnhancedCodeEditor(ft.Column):
             await self._handle_open(None)
         elif key == "W":
             await self._handle_close(None)
+        elif key == "G":
+            await self._handle_goto_line(None)
 
     # --- Status bar ---
 
@@ -610,6 +684,12 @@ class EnhancedCodeEditor(ft.Column):
         before = text[: max(0, offset)]
         lines = before.split("\n")
         return len(lines), len(lines[-1]) + 1
+
+    @staticmethod
+    def _line_to_offset(text: str, line: int) -> int:
+        """Return the character offset of the start of a 1-based line number."""
+        lines = text.split("\n")
+        return sum(len(lines[i]) + 1 for i in range(min(line - 1, len(lines))))
 
     def _handle_selection_change(self, e: ft.TextSelectionChangeEvent[fce.CodeEditor]):
         caret_offset = e.selection.end
