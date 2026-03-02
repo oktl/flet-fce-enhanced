@@ -8,6 +8,7 @@ import pytest
 
 from fce_enhanced.editor import DEFAULT_CODE, EnhancedCodeEditor
 from fce_enhanced.search import SearchReplaceBar
+from fce_enhanced.themes import DEFAULT_THEME
 
 
 # --- Helpers ---
@@ -751,3 +752,38 @@ async def test_ruff_format_failure_bails_out(tmp_path):
             assert editor._code_editor.value == "x=1\n"
     finally:
         _cleanup_patches(p1, p2, p3)
+
+
+# --- Theme selector ---
+
+
+def test_palette_button_in_appbar():
+    editor = _make_editor()
+    appbar = editor.controls[0]  # First row is the appbar
+    icons = [btn.icon for btn in appbar.controls if isinstance(btn, ft.IconButton)]
+    assert ft.Icons.PALETTE in icons
+
+
+def test_default_theme_applied():
+    editor = _make_editor()
+    assert editor._code_editor.code_theme == DEFAULT_THEME
+    assert editor._current_theme == DEFAULT_THEME
+
+
+def test_select_theme_updates_code_editor():
+    editor = _make_editor()
+    _, p1, p2, p3 = _patch_page(editor)
+    try:
+        editor._select_theme(fce.CodeTheme.DRACULA)
+        assert editor._code_editor.code_theme == fce.CodeTheme.DRACULA
+        assert editor._current_theme == fce.CodeTheme.DRACULA
+    finally:
+        _cleanup_patches(p1, p2, p3)
+
+
+def test_custom_theme_does_not_set_current_theme():
+    custom = fce.CustomCodeTheme(
+        keyword=ft.TextStyle(color=ft.Colors.RED),
+    )
+    editor = _make_editor(code_theme=custom)
+    assert editor._current_theme is None

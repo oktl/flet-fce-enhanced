@@ -15,6 +15,7 @@ from loguru import logger
 from fce_enhanced.file_dialog import open_file, save_file
 from fce_enhanced.languages import language_for_path
 from fce_enhanced.search import SearchReplaceBar
+from fce_enhanced.themes import DEFAULT_THEME, THEMES
 
 DEFAULT_CODE = """\
 # New file
@@ -78,13 +79,10 @@ class EnhancedCodeEditor(ft.Column):
 
         # --- Defaults ---
         if code_theme is None:
-            code_theme = fce.CustomCodeTheme(
-                keyword=ft.TextStyle(
-                    color=ft.Colors.INDIGO_600, weight=ft.FontWeight.W_600
-                ),
-                string=ft.TextStyle(color=ft.Colors.RED_700),
-                comment=ft.TextStyle(color=ft.Colors.GREY_600, italic=True),
-            )
+            code_theme = DEFAULT_THEME
+        self._current_theme: fce.CodeTheme | None = (
+            code_theme if isinstance(code_theme, fce.CodeTheme) else None
+        )
 
         if text_style is None:
             text_style = ft.TextStyle(font_family="monospace", height=1.2, size=13)
@@ -157,6 +155,12 @@ class EnhancedCodeEditor(ft.Column):
                     icon_size=ICON_SIZE,
                     tooltip="Close File (⌘W) ",
                     on_click=self._handle_close,
+                ),
+                ft.IconButton(
+                    ft.Icons.PALETTE,
+                    icon_size=ICON_SIZE,
+                    tooltip="Choose Theme",
+                    on_click=self._handle_theme_click,
                 ),
                 ft.IconButton(
                     ft.Icons.SEARCH,
@@ -466,6 +470,74 @@ class EnhancedCodeEditor(ft.Column):
         self._code_editor.value = DEFAULT_CODE
         self.update()
         await self._code_editor.focus()
+
+    # --- Theme selection ---
+
+    def _handle_theme_click(self, _e):
+        self._show_theme_dialog()
+
+    def _show_theme_dialog(self):
+        theme_list = ft.ListView(
+            height=300,
+            controls=self._build_theme_tiles(THEMES),
+        )
+
+        def close(_e):
+            self._theme_dlg.open = False
+            self.page.update()
+
+        self._theme_dlg = ft.AlertDialog(
+            title=ft.Text("Choose Theme"),
+            content=ft.Column(
+                [
+                    ft.TextField(
+                        hint_text="Search themes...",
+                        prefix_icon=ft.Icons.SEARCH,
+                        on_change=lambda e: self._filter_theme_list(
+                            e.control.value, theme_list
+                        ),
+                        autofocus=True,
+                    ),
+                    theme_list,
+                ],
+                tight=True,
+                width=350,
+            ),
+            actions=[ft.TextButton("Close", on_click=close)],
+            actions_alignment=ft.MainAxisAlignment.END,
+            on_dismiss=close,
+        )
+
+        self.page.overlay.append(self._theme_dlg)
+        self._theme_dlg.open = True
+        self.page.update()
+
+    def _build_theme_tiles(self, themes: dict[str, fce.CodeTheme]) -> list[ft.ListTile]:
+        tiles = []
+        for display_name, theme_val in themes.items():
+            is_current = theme_val == self._current_theme
+            tiles.append(
+                ft.ListTile(
+                    leading=ft.Icon(ft.Icons.CHECK, visible=is_current),
+                    title=ft.Text(display_name, size=14),
+                    on_click=lambda _e, t=theme_val: self._select_theme(t),
+                )
+            )
+        return tiles
+
+    def _filter_theme_list(self, query: str, theme_list: ft.ListView):
+        q = (query or "").lower()
+        filtered = {k: v for k, v in THEMES.items() if q in k.lower()}
+        theme_list.controls = self._build_theme_tiles(filtered)
+        self.page.update()
+
+    def _select_theme(self, theme: fce.CodeTheme):
+        self._current_theme = theme
+        self._code_editor.code_theme = theme
+        if hasattr(self, "_theme_dlg") and self._theme_dlg is not None:
+            self._theme_dlg.open = False
+        self.page.update()
+        self.update()
 
     # --- Search / Replace ---
 
