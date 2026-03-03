@@ -12,7 +12,6 @@ from fce_enhanced.file_dialog import (
     save_file,
 )
 
-
 # --- _open_file_macos ---
 
 
@@ -80,11 +79,14 @@ def test_save_file_macos_timeout():
 
 @pytest.mark.asyncio
 async def test_open_file_async_delegates_to_thread():
-    with patch("fce_enhanced.file_dialog.IS_MACOS", True), patch(
-        "fce_enhanced.file_dialog.asyncio.to_thread",
-        new_callable=AsyncMock,
-        return_value="/tmp/test.py",
-    ) as mock_to_thread:
+    with (
+        patch("fce_enhanced.file_dialog.IS_MACOS", True),
+        patch(
+            "fce_enhanced.file_dialog.asyncio.to_thread",
+            new_callable=AsyncMock,
+            return_value="/tmp/test.py",
+        ) as mock_to_thread,
+    ):
         result = await open_file("Open")
         mock_to_thread.assert_awaited_once_with(_open_file_macos, "Open")
         assert result == "/tmp/test.py"
@@ -92,11 +94,14 @@ async def test_open_file_async_delegates_to_thread():
 
 @pytest.mark.asyncio
 async def test_save_file_async_delegates_to_thread():
-    with patch("fce_enhanced.file_dialog.IS_MACOS", True), patch(
-        "fce_enhanced.file_dialog.asyncio.to_thread",
-        new_callable=AsyncMock,
-        return_value="/tmp/out.py",
-    ) as mock_to_thread:
+    with (
+        patch("fce_enhanced.file_dialog.IS_MACOS", True),
+        patch(
+            "fce_enhanced.file_dialog.asyncio.to_thread",
+            new_callable=AsyncMock,
+            return_value="/tmp/out.py",
+        ) as mock_to_thread,
+    ):
         result = await save_file("Save", "out.py")
         mock_to_thread.assert_awaited_once_with(_save_file_macos, "Save", "out.py")
         assert result == "/tmp/out.py"

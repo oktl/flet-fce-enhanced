@@ -1,7 +1,9 @@
-"""Enhanced CodeEditor with file open/save/save-as/close capabilities.
+"""Enhanced CodeEditor with file I/O, search/replace, and syntax highlighting.
 
-Based on CodeEditor control from Flet docs
-https://docs.flet.dev/codeeditor/ with added file I/O toolbar.
+Built on the CodeEditor control from Flet docs
+https://docs.flet.dev/codeeditor/ with a full-featured toolbar including
+file operations, find/replace, go-to-line, font sizing, read-only toggle,
+ruff on-save toggle, language and theme selectors, command palette, and help.
 """
 
 import asyncio
@@ -13,7 +15,16 @@ import flet as ft
 import flet_code_editor as fce
 from loguru import logger
 
+from fce_enhanced.dialogs import (
+    confirm_discard,
+    goto_line_dialog,
+    open_command_palette,
+    show_help_dialog,
+    show_language_dialog,
+    show_theme_dialog,
+)
 from fce_enhanced.file_dialog import open_file, save_file
+from fce_enhanced.help_content import HELP_TEXT
 from fce_enhanced.languages import extension_for_language, language_for_path
 from fce_enhanced.search import SearchReplaceBar
 from fce_enhanced.themes import DEFAULT_THEME, THEMES
@@ -22,19 +33,24 @@ DEFAULT_CODE = """\
 # New file
 """
 
-BUTTON_STYLE = ft.ButtonStyle(text_style=ft.TextStyle(size=12))
 APPBAR_HEIGHT = 18
-ICON_SIZE = 16
+ICON_SIZE = 18
 DEFAULT_FONT_SIZE = 13
 MIN_FONT_SIZE = 8
 MAX_FONT_SIZE = 32
 
 
 class EnhancedCodeEditor(ft.Column):
-    """A reusable Flet control that wraps CodeEditor with file I/O toolbar.
+    """A reusable Flet control that wraps CodeEditor with a full-featured toolbar.
 
-    Provides Open, Save, Save As, and Close buttons plus keyboard shortcuts
-    (Cmd/Ctrl+O, S, Shift+S, W). Can be dropped into any Flet page layout.
+    Toolbar buttons: Open, Save, Save As, Close, Find, Go to Line, Font Size
+    +/-, Read-Only toggle, Ruff On/Off toggle, Language selector, Theme
+    selector, and Help.
+
+    Keyboard shortcuts (Cmd/Ctrl unless noted):
+        O/S/Shift+S/W — file ops | F/H — find / find+replace |
+        G — go to line | L — read-only toggle | +/- — font size |
+        Shift+P — command palette | F1 — help | Esc — close search
 
     Args:
         language: Initial code language for syntax highlighting.
@@ -163,8 +179,8 @@ class EnhancedCodeEditor(ft.Column):
             on_close=self._on_search_closed,
         )
 
-        self.divder = ft.Container(
-            content=ft.VerticalDivider(width=1, color=ft.Colors.GREY_700),
+        self.appbar_divder = ft.Container(
+            content=ft.VerticalDivider(width=1, color=ft.Colors.GREY_600),
             height=APPBAR_HEIGHT - 4,
         )
 
@@ -193,7 +209,7 @@ class EnhancedCodeEditor(ft.Column):
                     tooltip="Close File (⌘W) ",
                     on_click=self._handle_close,
                 ),
-                self.divder,
+                self.appbar_divder,
                 ft.IconButton(
                     ft.Icons.SEARCH,
                     icon_size=ICON_SIZE,
@@ -219,7 +235,7 @@ class EnhancedCodeEditor(ft.Column):
                     tooltip="Increase Font Size (⌘+)",
                     on_click=lambda _e: self._change_font_size(1),
                 ),
-                self.divder,
+                self.appbar_divder,
                 self._lock_btn,
                 self._ruff_btn,
                 ft.Container(expand=True),  # spacer to push right-side controls
@@ -229,6 +245,12 @@ class EnhancedCodeEditor(ft.Column):
                     icon_size=ICON_SIZE,
                     tooltip="Choose Editor Theme",
                     on_click=self._handle_theme_click,
+                ),
+                ft.IconButton(
+                    ft.Icons.HELP_OUTLINE,
+                    icon_size=ICON_SIZE,
+                    tooltip="Help (F1)",
+                    on_click=lambda _e: self._show_help(),
                 ),
             ],
             spacing=0,
@@ -341,37 +363,7 @@ class EnhancedCodeEditor(ft.Column):
 
     async def _confirm_discard(self) -> str:
         """Show a Save/Discard/Cancel dialog. Returns chosen action string."""
-        choice: list[str | None] = [None]
-
-        def _on_choice(action: str):
-            def handler(_e):
-                choice[0] = action
-                dlg.open = False
-                self.page.update()
-
-            return handler
-
-        dlg = ft.AlertDialog(
-            modal=True,
-            title=ft.Text("Unsaved Changes"),
-            content=ft.Text("You have unsaved changes. What would you like to do?"),
-            actions=[
-                ft.TextButton("Save", on_click=_on_choice("save")),
-                ft.TextButton("Discard", on_click=_on_choice("discard")),
-                ft.TextButton("Cancel", on_click=_on_choice("cancel")),
-            ],
-            actions_alignment=ft.MainAxisAlignment.END,
-        )
-        self.page.overlay.append(dlg)
-        dlg.open = True
-        self.page.update()
-
-        while choice[0] is None:
-            await asyncio.sleep(0.05)
-
-        self.page.overlay.remove(dlg)
-        self.page.update()
-        return choice[0]
+        return await confirm_discard(self.page)
 
     # --- File operations ---
 
@@ -566,62 +558,9 @@ class EnhancedCodeEditor(ft.Column):
     # --- Theme selection ---
 
     def _handle_theme_click(self, _e):
-        self._show_theme_dialog()
-
-    def _show_theme_dialog(self):
-        theme_list = ft.ListView(
-            height=300,
-            controls=self._build_theme_tiles(THEMES),
+        self._theme_dlg = show_theme_dialog(
+            self.page, THEMES, self._current_theme, self._select_theme
         )
-
-        def close(_e):
-            self._theme_dlg.open = False
-            self.page.update()
-
-        self._theme_dlg = ft.AlertDialog(
-            title=ft.Text("Choose Theme"),
-            content=ft.Column(
-                [
-                    ft.TextField(
-                        hint_text="Search themes...",
-                        prefix_icon=ft.Icons.SEARCH,
-                        on_change=lambda e: self._filter_theme_list(
-                            e.control.value, theme_list
-                        ),
-                        autofocus=True,
-                    ),
-                    theme_list,
-                ],
-                tight=True,
-                width=350,
-            ),
-            actions=[ft.TextButton("Close", on_click=close)],
-            actions_alignment=ft.MainAxisAlignment.END,
-            on_dismiss=close,
-        )
-
-        self.page.overlay.append(self._theme_dlg)
-        self._theme_dlg.open = True
-        self.page.update()
-
-    def _build_theme_tiles(self, themes: dict[str, fce.CodeTheme]) -> list[ft.ListTile]:
-        tiles = []
-        for display_name, theme_val in themes.items():
-            is_current = theme_val == self._current_theme
-            tiles.append(
-                ft.ListTile(
-                    leading=ft.Icon(ft.Icons.CHECK, visible=is_current),
-                    title=ft.Text(display_name, size=14),
-                    on_click=lambda _e, t=theme_val: self._select_theme(t),
-                )
-            )
-        return tiles
-
-    def _filter_theme_list(self, query: str, theme_list: ft.ListView):
-        q = (query or "").lower()
-        filtered = {k: v for k, v in THEMES.items() if q in k.lower()}
-        theme_list.controls = self._build_theme_tiles(filtered)
-        self.page.update()
 
     def _select_theme(self, theme: fce.CodeTheme):
         self._current_theme = theme
@@ -638,73 +577,9 @@ class EnhancedCodeEditor(ft.Column):
         return lang.name.replace("_", " ").title()
 
     def _handle_language_click(self, _e):
-        self._show_language_dialog()
-
-    def _show_language_dialog(self):
-        languages = {
-            self._language_display_name(lang): lang
-            for lang in sorted(fce.CodeLanguage, key=lambda lg: lg.name)
-        }
-        lang_list = ft.ListView(
-            height=300,
-            controls=self._build_language_tiles(languages),
+        self._lang_dlg = show_language_dialog(
+            self.page, self._code_editor.language, self._select_language
         )
-
-        def close(_e):
-            self._lang_dlg.open = False
-            self.page.update()
-
-        self._lang_dlg = ft.AlertDialog(
-            title=ft.Text("Choose Language"),
-            content=ft.Column(
-                [
-                    ft.TextField(
-                        hint_text="Search languages...",
-                        prefix_icon=ft.Icons.SEARCH,
-                        on_change=lambda e: self._filter_language_list(
-                            e.control.value, lang_list, languages
-                        ),
-                        autofocus=True,
-                    ),
-                    lang_list,
-                ],
-                tight=True,
-                width=350,
-            ),
-            actions=[ft.TextButton("Close", on_click=close)],
-            actions_alignment=ft.MainAxisAlignment.END,
-            on_dismiss=close,
-        )
-
-        self.page.overlay.append(self._lang_dlg)
-        self._lang_dlg.open = True
-        self.page.update()
-
-    def _build_language_tiles(
-        self, languages: dict[str, fce.CodeLanguage]
-    ) -> list[ft.ListTile]:
-        tiles = []
-        for display_name, lang_val in languages.items():
-            is_current = lang_val == self._code_editor.language
-            tiles.append(
-                ft.ListTile(
-                    leading=ft.Icon(ft.Icons.CHECK, visible=is_current),
-                    title=ft.Text(display_name, size=14),
-                    on_click=lambda _e, lg=lang_val: self._select_language(lg),
-                )
-            )
-        return tiles
-
-    def _filter_language_list(
-        self,
-        query: str,
-        lang_list: ft.ListView,
-        languages: dict[str, fce.CodeLanguage],
-    ):
-        q = (query or "").lower()
-        filtered = {k: v for k, v in languages.items() if q in k.lower()}
-        lang_list.controls = self._build_language_tiles(filtered)
-        self.page.update()
 
     def _select_language(self, lang: fce.CodeLanguage):
         self._code_editor.language = lang
@@ -720,8 +595,8 @@ class EnhancedCodeEditor(ft.Column):
     async def _open_command_palette(self):
         """Show a searchable command palette dialog (Cmd+Shift+P / Ctrl+Shift+P)."""
         is_mac = platform.system() == "Darwin"
-        mod = "⌘" if is_mac else "Ctrl+"
-        shift_mod = "⇧⌘" if is_mac else "Ctrl+Shift+"
+        mod = "\u2318" if is_mac else "Ctrl+"
+        shift_mod = "\u21e7\u2318" if is_mac else "Ctrl+Shift+"
         commands = [
             ("Open File", f"{mod}O", self._handle_open),
             ("Save", f"{mod}S", self._handle_save),
@@ -735,97 +610,13 @@ class EnhancedCodeEditor(ft.Column):
             ),
             ("Go to Line", f"{mod}G", self._handle_goto_line),
             ("Choose Theme", "", self._handle_theme_click),
+            ("Choose Language", "", self._handle_language_click),
             ("Toggle Read-Only", f"{mod}L", lambda _: self._toggle_read_only()),
             ("Increase Font Size", f"{mod}+", lambda _: self._change_font_size(1)),
             ("Decrease Font Size", f"{mod}-", lambda _: self._change_font_size(-1)),
+            ("Help", "F1", lambda _: self._show_help()),
         ]
-
-        chosen: list[int | None] = [None]
-        cancelled: list[bool] = [False]
-
-        def _build_tiles(cmds):
-            tiles = []
-            for i, (name, shortcut, _handler) in enumerate(cmds):
-                tiles.append(
-                    ft.ListTile(
-                        title=ft.Text(name, size=14),
-                        trailing=ft.Text(shortcut, size=12, color=ft.Colors.GREY_500)
-                        if shortcut
-                        else None,
-                        on_click=lambda _e, idx=i: _select(idx),
-                    )
-                )
-            return tiles
-
-        def _select(idx):
-            chosen[0] = idx
-            dlg.open = False
-            self.page.update()
-
-        def _dismiss(_e):
-            cancelled[0] = True
-            dlg.open = False
-            self.page.update()
-
-        # Filtered command list (indices into `commands`)
-        filtered: list[int] = list(range(len(commands)))
-
-        cmd_list = ft.ListView(
-            height=300,
-            controls=_build_tiles(commands),
-        )
-
-        def _filter(e):
-            q = (e.control.value or "").lower()
-            filtered.clear()
-            filtered.extend(
-                i for i, (name, _s, _h) in enumerate(commands) if q in name.lower()
-            )
-            cmd_list.controls = [
-                ft.ListTile(
-                    title=ft.Text(commands[i][0], size=14),
-                    trailing=ft.Text(commands[i][1], size=12, color=ft.Colors.GREY_500)
-                    if commands[i][1]
-                    else None,
-                    on_click=lambda _e, idx=i: _select(idx),
-                )
-                for i in filtered
-            ]
-            self.page.update()
-
-        dlg = ft.AlertDialog(
-            title=ft.Text("Command Palette", size=14),
-            content=ft.Column(
-                [
-                    ft.TextField(
-                        hint_text="Type a command...",
-                        prefix_icon=ft.Icons.SEARCH,
-                        autofocus=True,
-                        on_change=_filter,
-                    ),
-                    cmd_list,
-                ],
-                tight=True,
-                width=350,
-            ),
-            on_dismiss=_dismiss,
-        )
-
-        self.page.overlay.append(dlg)
-        dlg.open = True
-        self.page.update()
-
-        while chosen[0] is None and not cancelled[0]:
-            await asyncio.sleep(0.05)
-
-        self.page.overlay.remove(dlg)
-        self.page.update()
-
-        if chosen[0] is not None:
-            handler = commands[chosen[0]][2]
-            result = handler(None)
-            if asyncio.iscoroutine(result):
-                await result
+        await open_command_palette(self.page, commands)
 
     # --- Read-only toggle ---
 
@@ -849,6 +640,11 @@ class EnhancedCodeEditor(ft.Column):
             self._ruff_btn.icon_color = ft.Colors.GREY_600
             self._ruff_btn.tooltip = "Ruff on Save: OFF"
         self.update()
+
+    # --- Help ---
+
+    def _show_help(self):
+        show_help_dialog(self.page, HELP_TEXT)
 
     # --- Font size ---
 
@@ -908,60 +704,12 @@ class EnhancedCodeEditor(ft.Column):
 
     async def _handle_goto_line(self, _e):
         """Show a dialog prompting for a line number, then jump to that line."""
-        result: list[int | None] = [None]
-        cancelled: list[bool] = [False]
         content = self._code_editor.value or ""
         max_lines = content.count("\n") + 1
 
-        line_field = ft.TextField(
-            label=f"Line number (1–{max_lines})",
-            keyboard_type=ft.KeyboardType.NUMBER,
-            autofocus=True,
-            text_size=13,
-            label_style=ft.TextStyle(size=12),
-            dense=True,
-            content_padding=ft.Padding.symmetric(horizontal=8, vertical=4),
-        )
-
-        def _go(_e):
-            try:
-                val = int(line_field.value)
-            except (TypeError, ValueError):
-                return
-            if 1 <= val <= max_lines:
-                result[0] = val
-                dlg.open = False
-                self.page.update()
-
-        def _cancel(_e):
-            cancelled[0] = True
-            dlg.open = False
-            self.page.update()
-
-        dlg = ft.AlertDialog(
-            modal=True,
-            title=ft.Text("Go to Line", size=14),
-            content=ft.Column([line_field], tight=True, width=200),
-            actions=[
-                ft.TextButton("Cancel", on_click=_cancel, style=BUTTON_STYLE),
-                ft.TextButton("Go", on_click=_go, style=BUTTON_STYLE),
-            ],
-            actions_alignment=ft.MainAxisAlignment.END,
-            content_padding=ft.Padding.symmetric(horizontal=20, vertical=8),
-            actions_padding=ft.Padding.only(right=12, bottom=8),
-        )
-        self.page.overlay.append(dlg)
-        dlg.open = True
-        self.page.update()
-
-        while result[0] is None and not cancelled[0]:
-            await asyncio.sleep(0.05)
-
-        self.page.overlay.remove(dlg)
-        self.page.update()
-
-        if result[0] is not None:
-            offset = self._line_to_offset(content, result[0])
+        line_num = await goto_line_dialog(self.page, max_lines)
+        if line_num is not None:
+            offset = self._line_to_offset(content, line_num)
             self._code_editor.selection = ft.TextSelection(
                 base_offset=offset, extent_offset=offset
             )
@@ -976,6 +724,10 @@ class EnhancedCodeEditor(ft.Column):
     async def _handle_keyboard(self, e: ft.KeyboardEvent):
         if e.key == "Escape" and self._search_bar.is_open:
             self._close_search()
+            return
+
+        if e.key == "F1":
+            self._show_help()
             return
 
         if not (e.meta or e.ctrl):

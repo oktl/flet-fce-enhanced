@@ -2,9 +2,7 @@
 
 from unittest.mock import MagicMock
 
-
 from fce_enhanced.search import SearchReplaceBar
-
 
 # --- Helpers ---
 

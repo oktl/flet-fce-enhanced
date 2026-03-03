@@ -10,7 +10,6 @@ from fce_enhanced.editor import DEFAULT_CODE, EnhancedCodeEditor
 from fce_enhanced.search import SearchReplaceBar
 from fce_enhanced.themes import DEFAULT_THEME
 
-
 # --- Helpers ---
 
 
