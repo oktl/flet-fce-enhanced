@@ -808,7 +808,7 @@ class EnhancedCodeEditor(ft.Column):
             self._search_bar._safe_update()
 
 
-def main(page: ft.Page):
+async def main(page: ft.Page):
     """Flet main entry point — standalone demo of the EnhancedCodeEditor."""
     page.title = "CodeEditor"
 
@@ -822,6 +822,8 @@ def main(page: ft.Page):
     )
 
     page.add(editor)
+
+    await page.window.center()
 
 
 def run():
