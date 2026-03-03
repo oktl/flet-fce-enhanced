@@ -157,27 +157,138 @@ def show_theme_dialog(
 # ---------------------------------------------------------------------------
 
 
+COMMON_LANGUAGES: set[str] = {
+    "BASH",
+    "CPP",
+    "CS",
+    "CSS",
+    "DART",
+    "DOCKERFILE",
+    "ELIXIR",
+    "ERLANG",
+    "GO",
+    "GRAPHQL",
+    "HASKELL",
+    "JAVA",
+    "JAVASCRIPT",
+    "JSON",
+    "KOTLIN",
+    "LUA",
+    "MAKEFILE",
+    "MARKDOWN",
+    "OBJECTIVEC",
+    "PERL",
+    "PHP",
+    "PLAINTEXT",
+    "POWERSHELL",
+    "PYTHON",
+    "R",
+    "RUBY",
+    "RUST",
+    "SCALA",
+    "SCSS",
+    "SHELL",
+    "SQL",
+    "SWIFT",
+    "TYPESCRIPT",
+    "VUE",
+    "XML",
+    "YAML",
+}
+
+
 def show_language_dialog(
     page: ft.Page,
     current_language: fce.CodeLanguage,
     on_select: Callable[[fce.CodeLanguage], None],
 ) -> ft.AlertDialog:
-    """Open a searchable language picker dialog.
+    """Open a searchable language picker dialog with a Common/All toggle.
 
     Returns the dialog instance so the caller can close it after selection.
     """
-    languages = {
+    all_languages = {
         lang.name.replace("_", " ").title(): lang
         for lang in sorted(fce.CodeLanguage, key=lambda lg: lg.name)
     }
-    return _searchable_list_dialog(
-        title="Choose Language",
-        items=languages,
-        current=current_language,
-        on_select=on_select,
-        page=page,
-        hint="Search languages...",
+    common_languages = {
+        k: v for k, v in all_languages.items() if v.name in COMMON_LANGUAGES
+    }
+
+    # Always start with Common
+    active_items = [common_languages]
+
+    list_view = ft.ListView(
+        height=300,
+        controls=_build_list_tiles(active_items[0], current_language, on_select),
     )
+
+    search_field = ft.TextField(
+        hint_text="Search languages...",
+        prefix_icon=ft.Icons.SEARCH,
+        autofocus=True,
+    )
+
+    def _refresh():
+        q = (search_field.value or "").lower()
+        items = active_items[0]
+        filtered = {k: v for k, v in items.items() if q in k.lower()} if q else items
+        list_view.controls = _build_list_tiles(filtered, current_language, on_select)
+        page.update()
+
+    search_field.on_change = lambda _e: _refresh()
+
+    common_btn = ft.TextButton(
+        "Common",
+        style=ft.ButtonStyle(
+            bgcolor=ft.Colors.PRIMARY,
+            color=ft.Colors.ON_PRIMARY,
+        ),
+    )
+    all_btn = ft.TextButton("All")
+
+    def _on_toggle(show_all: bool):
+        active_items[0] = all_languages if show_all else common_languages
+        if show_all:
+            all_btn.style = ft.ButtonStyle(
+                bgcolor=ft.Colors.PRIMARY, color=ft.Colors.ON_PRIMARY
+            )
+            common_btn.style = ft.ButtonStyle()
+        else:
+            common_btn.style = ft.ButtonStyle(
+                bgcolor=ft.Colors.PRIMARY, color=ft.Colors.ON_PRIMARY
+            )
+            all_btn.style = ft.ButtonStyle()
+        _refresh()
+
+    common_btn.on_click = lambda _e: _on_toggle(False)
+    all_btn.on_click = lambda _e: _on_toggle(True)
+
+    toggle_row = ft.Row([common_btn, all_btn], spacing=4)
+
+    def _close(_e):
+        dlg.open = False
+        page.update()
+
+    dlg = ft.AlertDialog(
+        title=ft.Text("Choose Language"),
+        content=ft.Column(
+            [
+                toggle_row,
+                search_field,
+                list_view,
+            ],
+            tight=True,
+            width=350,
+        ),
+        actions=[ft.TextButton("Close", on_click=_close)],
+        actions_alignment=ft.MainAxisAlignment.END,
+        on_dismiss=_close,
+    )
+
+    page.overlay.append(dlg)
+    dlg.open = True
+    page.update()
+    return dlg
 
 
 # ---------------------------------------------------------------------------

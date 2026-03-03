@@ -14,6 +14,7 @@ HELP_TEXT = """\
 | Go to Line | ⌘G | Ctrl+G |
 | Command Palette | ⇧⌘P | Ctrl+Shift+P |
 | Toggle Read-Only | ⌘L | Ctrl+L |
+| Change Language | ⇧⌘L | Ctrl+Shift+L |
 | Increase Font Size | ⌘+ | Ctrl++ |
 | Decrease Font Size | ⌘- | Ctrl+- |
 | Help | F1 | F1 |

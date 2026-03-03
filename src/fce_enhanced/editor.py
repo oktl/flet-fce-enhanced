@@ -49,8 +49,8 @@ class EnhancedCodeEditor(ft.Column):
 
     Keyboard shortcuts (Cmd/Ctrl unless noted):
         O/S/Shift+S/W — file ops | F — find | Option+F / Ctrl+H — replace |
-        G — go to line | L — read-only toggle | +/- — font size |
-        Shift+P — command palette | F1 — help | Esc — close search
+        G — go to line | L — read-only toggle | Shift+L — language |
+        +/- — font size | Shift+P — command palette | F1 — help | Esc — close search
 
     Args:
         language: Initial code language for syntax highlighting.
@@ -153,7 +153,7 @@ class EnhancedCodeEditor(ft.Column):
         self._lang_btn = ft.TextButton(
             language.name.replace("_", " ").title(),
             style=ft.ButtonStyle(text_style=ft.TextStyle(size=11)),
-            tooltip="Change Language",
+            tooltip="Change Language (⇧⌘L)",
             on_click=self._handle_language_click,
         )
 
@@ -610,7 +610,7 @@ class EnhancedCodeEditor(ft.Column):
             ),
             ("Go to Line", f"{mod}G", self._handle_goto_line),
             ("Choose Theme", "", self._handle_theme_click),
-            ("Choose Language", "", self._handle_language_click),
+            ("Choose Language", f"{shift_mod}L", self._handle_language_click),
             ("Toggle Read-Only", f"{mod}L", lambda _: self._toggle_read_only()),
             ("Increase Font Size", f"{mod}+", lambda _: self._change_font_size(1)),
             ("Decrease Font Size", f"{mod}-", lambda _: self._change_font_size(-1)),
@@ -750,6 +750,8 @@ class EnhancedCodeEditor(ft.Column):
             await self._handle_open(None)
         elif key == "W":
             await self._handle_close(None)
+        elif key == "L" and e.shift:
+            self._handle_language_click(None)
         elif key == "L":
             self._toggle_read_only()
         elif key == "G":
