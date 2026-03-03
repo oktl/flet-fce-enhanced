@@ -23,6 +23,7 @@ from fce_enhanced.dialogs import (
     show_language_dialog,
     show_theme_dialog,
 )
+from fce_enhanced.diff_pane import DiffPane
 from fce_enhanced.file_dialog import open_file, save_file
 from fce_enhanced.help_content import HELP_TEXT
 from fce_enhanced.languages import extension_for_language, language_for_path
@@ -179,6 +180,21 @@ class EnhancedCodeEditor(ft.Column):
             on_close=self._on_search_closed,
         )
 
+        # --- Diff pane ---
+        self._diff_pane = DiffPane(
+            get_original_text=lambda: self._last_saved_content,
+            get_current_text=lambda: self._code_editor.value or "",
+            on_close=self._on_diff_closed,
+            code_theme=code_theme,
+        )
+
+        self._diff_btn = ft.IconButton(
+            ft.Icons.DIFFERENCE,
+            icon_size=ICON_SIZE,
+            tooltip="Toggle Diff (⌘D)",
+            on_click=lambda _e: self._toggle_diff_pane(),
+        )
+
         self.appbar_divder = ft.Container(
             content=ft.VerticalDivider(width=1, color=ft.Colors.GREY_600),
             height=APPBAR_HEIGHT - 4,
@@ -216,6 +232,7 @@ class EnhancedCodeEditor(ft.Column):
                     tooltip="Find (⌘F)",
                     on_click=self._handle_find_click,
                 ),
+                self._diff_btn,
                 ft.IconButton(
                     ft.Icons.FORMAT_LIST_NUMBERED,
                     icon_size=ICON_SIZE,
@@ -272,6 +289,8 @@ class EnhancedCodeEditor(ft.Column):
 
         if show_status_bar:
             controls.append(ft.Row(controls=[self._status_bar]))
+
+        controls.append(self._diff_pane)
 
         self.spacing = 10
         self.controls = controls
@@ -358,6 +377,8 @@ class EnhancedCodeEditor(ft.Column):
         self._last_saved_content = content
         self._save_btn.disabled = True
         self._update_title()
+        if self._diff_pane.is_open:
+            self._diff_pane.recompute()
 
     # --- Unsaved-changes confirmation dialog ---
 
@@ -389,6 +410,10 @@ class EnhancedCodeEditor(ft.Column):
             err.open = True
             self.page.update()
             return
+
+        if self._diff_pane.is_open:
+            self._diff_pane.close()
+            self._diff_btn.icon_color = None
 
         self._current_path = path
         self._last_saved_content = content
@@ -541,6 +566,10 @@ class EnhancedCodeEditor(ft.Column):
             elif action == "cancel":
                 return
 
+        if self._diff_pane.is_open:
+            self._diff_pane.close()
+            self._diff_btn.icon_color = None
+
         self._current_path = None
         self._dirty = False
         self._last_saved_content = DEFAULT_CODE
@@ -565,6 +594,7 @@ class EnhancedCodeEditor(ft.Column):
     def _select_theme(self, theme: fce.CodeTheme):
         self._current_theme = theme
         self._code_editor.code_theme = theme
+        self._diff_pane.code_theme = theme
         if hasattr(self, "_theme_dlg") and self._theme_dlg is not None:
             self._theme_dlg.open = False
         self.page.update()
@@ -609,6 +639,7 @@ class EnhancedCodeEditor(ft.Column):
                 lambda _: self._open_search(with_replace=True),
             ),
             ("Go to Line", f"{mod}G", self._handle_goto_line),
+            ("Toggle Diff", f"{mod}D", lambda _: self._toggle_diff_pane()),
             ("Choose Theme", "", self._handle_theme_click),
             ("Choose Language", f"{shift_mod}L", self._handle_language_click),
             ("Toggle Read-Only", f"{mod}L", lambda _: self._toggle_read_only()),
@@ -700,6 +731,21 @@ class EnhancedCodeEditor(ft.Column):
         """Called by SearchReplaceBar.close() — just update layout, don't call close again."""
         self.page.update()
 
+    # --- Diff pane ---
+
+    def _toggle_diff_pane(self) -> None:
+        if self._diff_pane.is_open:
+            self._diff_pane.close()
+        else:
+            self._diff_pane.open()
+        self._diff_btn.icon_color = ft.Colors.BLUE if self._diff_pane.is_open else None
+        self.page.update()
+
+    def _on_diff_closed(self) -> None:
+        """Called by DiffPane.close() — update button state and layout."""
+        self._diff_btn.icon_color = None
+        self.page.update()
+
     # --- Go to Line ---
 
     async def _handle_goto_line(self, _e):
@@ -760,6 +806,8 @@ class EnhancedCodeEditor(ft.Column):
             self._change_font_size(1)
         elif key == "MINUS" or key == "-":
             self._change_font_size(-1)
+        elif key == "D":
+            self._toggle_diff_pane()
 
     # --- Status bar ---
 
@@ -806,6 +854,9 @@ class EnhancedCodeEditor(ft.Column):
         if self._search_bar.is_open:
             self._search_bar.recompute()
             self._search_bar._safe_update()
+
+        if self._diff_pane.is_open:
+            self._diff_pane.recompute()
 
 
 async def main(page: ft.Page):

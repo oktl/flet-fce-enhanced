@@ -14,6 +14,7 @@ HELP_TEXT = """\
 | Go to Line | ⌘G | Ctrl+G |
 | Command Palette | ⇧⌘P | Ctrl+Shift+P |
 | Toggle Read-Only | ⌘L | Ctrl+L |
+| Toggle Diff | ⌘D | Ctrl+D |
 | Change Language | ⇧⌘L | Ctrl+Shift+L |
 | Increase Font Size | ⌘+ | Ctrl++ |
 | Decrease Font Size | ⌘- | Ctrl+- |
@@ -24,6 +25,7 @@ HELP_TEXT = """\
 
 - **Open / Save / Save As / Close** — file operations
 - **Find** — open the search bar (toggle replace with the expand button)
+- **Diff** — toggle a unified diff pane showing changes since last save
 - **Go to Line** — jump to a specific line number
 - **Font Size** — increase or decrease editor font size
 - **Read-Only Lock** — toggle read-only mode
