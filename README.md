@@ -121,7 +121,7 @@ editor.search_bar      # the SearchReplaceBar control
 - **Language Selector** — Choose syntax highlighting language from a searchable dialog; auto-detected on file open, and Save As defaults to the matching file extension
 - **Language Detection** — Automatic syntax highlighting for 40+ file extensions
 - **Dirty-File Tracking** — Visual indicator for unsaved changes
-- **Ruff on Save** — Auto-runs `ruff check --fix` and `ruff format` on Python files (requires ruff on PATH)
+- **Ruff on Save** — Auto-runs `ruff check --fix` and `ruff format` on Python files (requires ruff on PATH); toggleable from the toolbar
 - **Status Bar** — Line, column, language, and selection info
 
 ### Keyboard shortcuts
@@ -133,12 +133,14 @@ editor.search_bar      # the SearchReplaceBar control
 | Save As            | ⇧⌘S   | Ctrl+Shift+S    |
 | Close File         | ⌘W    | Ctrl+W          |
 | Find               | ⌘F    | Ctrl+F          |
-| Find and Replace   | ⌘H    | Ctrl+H          |
+| Find and Replace   | ⌥⌘F   | Ctrl+H          |
 | Go to Line         | ⌘G    | Ctrl+G          |
 | Toggle Read-Only   | ⌘L    | Ctrl+L          |
 | Increase Font Size | ⌘+    | Ctrl++          |
 | Decrease Font Size | ⌘-    | Ctrl+-          |
 | Command Palette    | ⇧⌘P   | Ctrl+Shift+P    |
+| Help               | F1    | F1              |
+| Close Search Bar   | Esc   | Esc             |
 
 ## License
 
