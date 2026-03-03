@@ -452,6 +452,7 @@ async def test_ctrl_f_opens_search():
         event.meta = True
         event.ctrl = False
         event.shift = False
+        event.alt = False
 
         await editor._handle_keyboard(event)
 
@@ -471,13 +472,16 @@ async def test_ctrl_h_opens_search_with_replace():
     )
     focus_patch.start()
     try:
-        event = MagicMock(spec=ft.KeyboardEvent)
-        event.key = "H"
-        event.meta = True
-        event.ctrl = False
-        event.shift = False
+        # On non-Mac: Ctrl+H opens find & replace
+        with patch("platform.system", return_value="Linux"):
+            event = MagicMock(spec=ft.KeyboardEvent)
+            event.key = "H"
+            event.meta = False
+            event.ctrl = True
+            event.shift = False
+            event.alt = False
 
-        await editor._handle_keyboard(event)
+            await editor._handle_keyboard(event)
 
         assert editor._search_bar.is_open is True
         assert editor._search_bar._replace_row.visible is True
@@ -498,6 +502,7 @@ async def test_escape_closes_search():
         event.meta = False
         event.ctrl = False
         event.shift = False
+        event.alt = False
 
         await editor._handle_keyboard(event)
 

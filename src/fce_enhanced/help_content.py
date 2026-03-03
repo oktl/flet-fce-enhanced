@@ -10,7 +10,7 @@ HELP_TEXT = """\
 | Save As | ⇧⌘S | Ctrl+Shift+S |
 | Close File | ⌘W | Ctrl+W |
 | Find | ⌘F | Ctrl+F |
-| Find & Replace | ⌘H | Ctrl+H |
+| Find & Replace | ⌥⌘F | Ctrl+H |
 | Go to Line | ⌘G | Ctrl+G |
 | Command Palette | ⇧⌘P | Ctrl+Shift+P |
 | Toggle Read-Only | ⌘L | Ctrl+L |
@@ -33,7 +33,7 @@ HELP_TEXT = """\
 
 ## Search & Replace
 
-Open with ⌘F (find) or ⌘H (find & replace). Use the **Aa** button to toggle
+Open with ⌘F (find) or ⌥⌘F (find & replace) on Mac, Ctrl+H on Windows/Linux. Use the **Aa** button to toggle
 case sensitivity. Navigate matches with the arrow buttons or press Enter.
 Press Escape to close the search bar.
 

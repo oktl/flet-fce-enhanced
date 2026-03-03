@@ -48,7 +48,7 @@ class EnhancedCodeEditor(ft.Column):
     selector, and Help.
 
     Keyboard shortcuts (Cmd/Ctrl unless noted):
-        O/S/Shift+S/W — file ops | F/H — find / find+replace |
+        O/S/Shift+S/W — file ops | F — find | Option+F / Ctrl+H — replace |
         G — go to line | L — read-only toggle | +/- — font size |
         Shift+P — command palette | F1 — help | Esc — close search
 
@@ -605,7 +605,7 @@ class EnhancedCodeEditor(ft.Column):
             ("Find", f"{mod}F", lambda _: self._open_search(with_replace=False)),
             (
                 "Find and Replace",
-                f"{mod}H",
+                f"\u2325{mod}F" if is_mac else "Ctrl+H",
                 lambda _: self._open_search(with_replace=True),
             ),
             ("Go to Line", f"{mod}G", self._handle_goto_line),
@@ -732,12 +732,15 @@ class EnhancedCodeEditor(ft.Column):
 
         if not (e.meta or e.ctrl):
             return
+        is_mac = platform.system() == "Darwin"
         key = e.key.upper()
         if key == "P" and e.shift:
             await self._open_command_palette()
+        elif key == "F" and e.alt and is_mac:
+            await self._open_search(with_replace=True)
         elif key == "F":
             await self._open_search(with_replace=False)
-        elif key == "H":
+        elif key == "H" and not is_mac:
             await self._open_search(with_replace=True)
         elif key == "S" and not e.shift:
             await self._do_save()
