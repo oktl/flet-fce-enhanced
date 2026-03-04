@@ -42,6 +42,7 @@ class SearchReplaceBar(ft.Column):
         # --- State ---
         self._search_query: str = ""
         self._case_sensitive: bool = False
+        self._whole_word: bool = False
         self._match_positions: list[tuple[int, int]] = []  # (start, end)
         self._current_match_index: int = -1
         self._replace_visible: bool = False
@@ -70,6 +71,14 @@ class SearchReplaceBar(ft.Column):
             icon_size=16,
             selected=False,
             on_click=self._handle_toggle_case,
+        )
+
+        self._whole_word_btn = ft.IconButton(
+            icon=ft.Icons.ABC,
+            tooltip="Whole Word",
+            icon_size=20,
+            selected=False,
+            on_click=self._handle_toggle_whole_word,
         )
 
         self._replace_field = ft.TextField(
@@ -116,6 +125,7 @@ class SearchReplaceBar(ft.Column):
                 self._search_field,
                 self._match_count_label,
                 self._case_btn,
+                self._whole_word_btn,
                 ft.IconButton(
                     icon=ft.Icons.ARROW_UPWARD,
                     tooltip="Previous Match",
@@ -175,6 +185,9 @@ class SearchReplaceBar(ft.Column):
         self._search_field.value = ""
         self._match_positions = []
         self._current_match_index = -1
+        self._whole_word = False
+        self._whole_word_btn.selected = False
+        self._whole_word_btn.icon_color = None
         self._match_count_label.value = "No results"
         # Remove all children so Flet renders nothing
         self.controls = []
@@ -199,19 +212,25 @@ class SearchReplaceBar(ft.Column):
         text = self._get_text()
         query = self._search_query
 
-        if not self._case_sensitive:
-            text_search = text.lower()
-            query = query.lower()
+        if self._whole_word:
+            pattern = r"\b" + re.escape(query) + r"\b"
+            flags = 0 if self._case_sensitive else re.IGNORECASE
+            for m in re.finditer(pattern, text, flags):
+                self._match_positions.append((m.start(), m.end()))
         else:
-            text_search = text
+            if not self._case_sensitive:
+                text_search = text.lower()
+                query = query.lower()
+            else:
+                text_search = text
 
-        start = 0
-        while True:
-            idx = text_search.find(query, start)
-            if idx == -1:
-                break
-            self._match_positions.append((idx, idx + len(self._search_query)))
-            start = idx + 1
+            start = 0
+            while True:
+                idx = text_search.find(query, start)
+                if idx == -1:
+                    break
+                self._match_positions.append((idx, idx + len(self._search_query)))
+                start = idx + 1
 
         if self._match_positions:
             self._current_match_index = 0
@@ -269,6 +288,13 @@ class SearchReplaceBar(ft.Column):
         self._case_sensitive = not self._case_sensitive
         self._case_btn.selected = self._case_sensitive
         self._case_btn.icon_color = ft.Colors.BLUE if self._case_sensitive else None
+        self.recompute()
+        self._safe_update()
+
+    def _handle_toggle_whole_word(self, _e) -> None:
+        self._whole_word = not self._whole_word
+        self._whole_word_btn.selected = self._whole_word
+        self._whole_word_btn.icon_color = ft.Colors.BLUE if self._whole_word else None
         self.recompute()
         self._safe_update()
 
