@@ -865,3 +865,447 @@ def test_custom_theme_does_not_set_current_theme():
     )
     editor = _make_editor(code_theme=custom)
     assert editor._current_theme is None
+
+
+# --- Group 1: Toggle / font size state mutations ---
+
+
+def test_ruff_on_save_property():
+    editor = _make_editor(ruff_on_save=True)
+    assert editor.ruff_on_save is True
+    editor2 = _make_editor(ruff_on_save=False)
+    assert editor2.ruff_on_save is False
+
+
+def test_toggle_read_only():
+    editor = _make_editor()
+    _, p1, p2, p3 = _patch_page(editor)
+    try:
+        assert editor._code_editor.read_only is False
+        editor._toggle_read_only()
+        assert editor._code_editor.read_only is True
+        assert editor._lock_btn.icon == ft.Icons.LOCK
+        assert "Unlock" in editor._lock_btn.tooltip
+
+        editor._toggle_read_only()
+        assert editor._code_editor.read_only is False
+        assert editor._lock_btn.icon == ft.Icons.LOCK_OPEN
+    finally:
+        _cleanup_patches(p1, p2, p3)
+
+
+def test_toggle_ruff_on_save():
+    editor = _make_editor(ruff_on_save=True)
+    _, p1, p2, p3 = _patch_page(editor)
+    try:
+        editor._toggle_ruff_on_save(None)
+        assert editor._ruff_on_save is False
+        assert editor._ruff_btn.icon == ft.Icons.AUTO_FIX_OFF
+        assert editor._ruff_btn.icon_color == ft.Colors.GREY_600
+        assert "OFF" in editor._ruff_btn.tooltip
+
+        editor._toggle_ruff_on_save(None)
+        assert editor._ruff_on_save is True
+        assert editor._ruff_btn.icon == ft.Icons.AUTO_FIX_HIGH
+        assert editor._ruff_btn.icon_color is None
+        assert "ON" in editor._ruff_btn.tooltip
+    finally:
+        _cleanup_patches(p1, p2, p3)
+
+
+def test_change_font_size_increases():
+    editor = _make_editor()
+    _, p1, p2, p3 = _patch_page(editor)
+    try:
+        initial = editor._font_size
+        editor._change_font_size(1)
+        assert editor._font_size == initial + 1
+        assert editor._font_size_label.value == f"{initial + 1}px"
+    finally:
+        _cleanup_patches(p1, p2, p3)
+
+
+def test_change_font_size_decreases():
+    editor = _make_editor()
+    _, p1, p2, p3 = _patch_page(editor)
+    try:
+        initial = editor._font_size
+        editor._change_font_size(-1)
+        assert editor._font_size == initial - 1
+    finally:
+        _cleanup_patches(p1, p2, p3)
+
+
+def test_change_font_size_clamps_at_min():
+    from fce_enhanced.editor import MIN_FONT_SIZE
+
+    editor = _make_editor()
+    _, p1, p2, p3 = _patch_page(editor)
+    try:
+        editor._font_size = MIN_FONT_SIZE
+        editor._change_font_size(-1)
+        assert editor._font_size == MIN_FONT_SIZE
+    finally:
+        _cleanup_patches(p1, p2, p3)
+
+
+def test_change_font_size_clamps_at_max():
+    from fce_enhanced.editor import MAX_FONT_SIZE
+
+    editor = _make_editor()
+    _, p1, p2, p3 = _patch_page(editor)
+    try:
+        editor._font_size = MAX_FONT_SIZE
+        editor._change_font_size(1)
+        assert editor._font_size == MAX_FONT_SIZE
+    finally:
+        _cleanup_patches(p1, p2, p3)
+
+
+# --- Group 2: Keyboard shortcut dispatch ---
+
+
+def _make_key_event(key, *, meta=False, ctrl=False, shift=False, alt=False):
+    """Create a mock KeyboardEvent."""
+    event = MagicMock(spec=ft.KeyboardEvent)
+    event.key = key
+    event.meta = meta
+    event.ctrl = ctrl
+    event.shift = shift
+    event.alt = alt
+    return event
+
+
+@pytest.mark.asyncio
+async def test_keyboard_save():
+    editor = _make_editor()
+    _, p1, p2, p3 = _patch_page(editor)
+    try:
+        with patch.object(editor, "_do_save", new_callable=AsyncMock) as mock:
+            await editor._handle_keyboard(_make_key_event("S", meta=True))
+            mock.assert_awaited_once()
+    finally:
+        _cleanup_patches(p1, p2, p3)
+
+
+@pytest.mark.asyncio
+async def test_keyboard_save_as():
+    editor = _make_editor()
+    _, p1, p2, p3 = _patch_page(editor)
+    try:
+        with patch.object(editor, "_do_save_as", new_callable=AsyncMock) as mock:
+            await editor._handle_keyboard(_make_key_event("S", meta=True, shift=True))
+            mock.assert_awaited_once()
+    finally:
+        _cleanup_patches(p1, p2, p3)
+
+
+@pytest.mark.asyncio
+async def test_keyboard_open():
+    editor = _make_editor()
+    _, p1, p2, p3 = _patch_page(editor)
+    try:
+        with patch.object(editor, "_handle_open", new_callable=AsyncMock) as mock:
+            await editor._handle_keyboard(_make_key_event("O", meta=True))
+            mock.assert_awaited_once()
+    finally:
+        _cleanup_patches(p1, p2, p3)
+
+
+@pytest.mark.asyncio
+async def test_keyboard_close():
+    editor = _make_editor()
+    _, p1, p2, p3 = _patch_page(editor)
+    try:
+        with patch.object(editor, "_handle_close", new_callable=AsyncMock) as mock:
+            await editor._handle_keyboard(_make_key_event("W", meta=True))
+            mock.assert_awaited_once()
+    finally:
+        _cleanup_patches(p1, p2, p3)
+
+
+@pytest.mark.asyncio
+async def test_keyboard_goto_line():
+    editor = _make_editor()
+    _, p1, p2, p3 = _patch_page(editor)
+    try:
+        with patch.object(editor, "_handle_goto_line", new_callable=AsyncMock) as mock:
+            await editor._handle_keyboard(_make_key_event("G", meta=True))
+            mock.assert_awaited_once()
+    finally:
+        _cleanup_patches(p1, p2, p3)
+
+
+@pytest.mark.asyncio
+async def test_keyboard_toggle_read_only():
+    editor = _make_editor()
+    _, p1, p2, p3 = _patch_page(editor)
+    try:
+        with patch.object(editor, "_toggle_read_only") as mock:
+            await editor._handle_keyboard(_make_key_event("L", meta=True))
+            mock.assert_called_once()
+    finally:
+        _cleanup_patches(p1, p2, p3)
+
+
+@pytest.mark.asyncio
+async def test_keyboard_language():
+    editor = _make_editor()
+    _, p1, p2, p3 = _patch_page(editor)
+    try:
+        with patch.object(editor, "_handle_language_click") as mock:
+            await editor._handle_keyboard(_make_key_event("L", meta=True, shift=True))
+            mock.assert_called_once()
+    finally:
+        _cleanup_patches(p1, p2, p3)
+
+
+@pytest.mark.asyncio
+async def test_keyboard_font_increase():
+    editor = _make_editor()
+    _, p1, p2, p3 = _patch_page(editor)
+    try:
+        with patch.object(editor, "_change_font_size") as mock:
+            await editor._handle_keyboard(_make_key_event("EQUAL", meta=True))
+            mock.assert_called_once_with(1)
+    finally:
+        _cleanup_patches(p1, p2, p3)
+
+
+@pytest.mark.asyncio
+async def test_keyboard_font_decrease():
+    editor = _make_editor()
+    _, p1, p2, p3 = _patch_page(editor)
+    try:
+        with patch.object(editor, "_change_font_size") as mock:
+            await editor._handle_keyboard(_make_key_event("MINUS", meta=True))
+            mock.assert_called_once_with(-1)
+    finally:
+        _cleanup_patches(p1, p2, p3)
+
+
+@pytest.mark.asyncio
+async def test_keyboard_toggle_diff():
+    editor = _make_editor()
+    _, p1, p2, p3 = _patch_page(editor)
+    try:
+        with patch.object(editor, "_toggle_diff_pane") as mock:
+            await editor._handle_keyboard(_make_key_event("D", meta=True))
+            mock.assert_called_once()
+    finally:
+        _cleanup_patches(p1, p2, p3)
+
+
+@pytest.mark.asyncio
+async def test_keyboard_f1_help():
+    editor = _make_editor()
+    _, p1, p2, p3 = _patch_page(editor)
+    try:
+        with patch.object(editor, "_show_help") as mock:
+            await editor._handle_keyboard(_make_key_event("F1", meta=False, ctrl=False))
+            mock.assert_called_once()
+    finally:
+        _cleanup_patches(p1, p2, p3)
+
+
+@pytest.mark.asyncio
+async def test_keyboard_command_palette():
+    editor = _make_editor()
+    _, p1, p2, p3 = _patch_page(editor)
+    try:
+        with patch.object(
+            editor, "_open_command_palette", new_callable=AsyncMock
+        ) as mock:
+            await editor._handle_keyboard(_make_key_event("P", meta=True, shift=True))
+            mock.assert_awaited_once()
+    finally:
+        _cleanup_patches(p1, p2, p3)
+
+
+@pytest.mark.asyncio
+async def test_keyboard_alt_f_opens_replace_on_mac():
+    editor = _make_editor()
+    _, p1, p2, p3 = _patch_page(editor)
+    focus_patch = patch.object(
+        editor._search_bar._search_field, "focus", new_callable=AsyncMock
+    )
+    focus_patch.start()
+    try:
+        with patch("platform.system", return_value="Darwin"):
+            await editor._handle_keyboard(_make_key_event("F", meta=True, alt=True))
+        assert editor._search_bar.is_open is True
+        assert editor._search_bar._replace_row.visible is True
+    finally:
+        focus_patch.stop()
+        _cleanup_patches(p1, p2, p3)
+
+
+@pytest.mark.asyncio
+async def test_keyboard_no_meta_ctrl_ignored():
+    """Keys without meta/ctrl (except Escape/F1) should be ignored."""
+    editor = _make_editor()
+    _, p1, p2, p3 = _patch_page(editor)
+    try:
+        with patch.object(editor, "_do_save", new_callable=AsyncMock) as mock:
+            await editor._handle_keyboard(_make_key_event("S"))
+            mock.assert_not_awaited()
+    finally:
+        _cleanup_patches(p1, p2, p3)
+
+
+# --- Group 3: _line_to_offset, status bar, selection change ---
+
+
+def test_line_to_offset_first_line():
+    assert EnhancedCodeEditor._line_to_offset("hello\nworld\nfoo", 1) == 0
+
+
+def test_line_to_offset_second_line():
+    assert EnhancedCodeEditor._line_to_offset("hello\nworld\nfoo", 2) == 6
+
+
+def test_line_to_offset_third_line():
+    assert EnhancedCodeEditor._line_to_offset("hello\nworld\nfoo", 3) == 12
+
+
+def test_update_status_bar_default():
+    editor = _make_editor()
+    editor._update_status_bar()
+    assert editor._status_bar.value == "Ln 1, Col 1 | Python"
+
+
+def test_update_status_bar_with_position():
+    editor = _make_editor()
+    editor._update_status_bar(line=5, col=10)
+    assert "Ln 5, Col 10" in editor._status_bar.value
+
+
+def test_update_status_bar_with_selection():
+    editor = _make_editor()
+    editor._update_status_bar(line=1, col=1, selected_text="hello")
+    assert "5 chars selected" in editor._status_bar.value
+
+
+def test_update_status_bar_language_name():
+    editor = _make_editor(language=fce.CodeLanguage.JAVASCRIPT)
+    editor._update_status_bar()
+    assert "Javascript" in editor._status_bar.value
+
+
+def test_handle_selection_change():
+    editor = _make_editor(value="hello\nworld")
+    _, p1, p2, p3 = _patch_page(editor)
+    try:
+        event = MagicMock()
+        event.selection.end = 8  # "wor" on second line
+        event.selected_text = "wo"
+        editor._handle_selection_change(event)
+        assert "Ln 2, Col 3" in editor._status_bar.value
+        assert "2 chars selected" in editor._status_bar.value
+    finally:
+        _cleanup_patches(p1, p2, p3)
+
+
+# --- Group 4: _handle_close (non-dirty), _toggle_diff_pane, _handle_change revert ---
+
+
+@pytest.mark.asyncio
+async def test_handle_close_non_dirty_resets():
+    """Close when not dirty should reset without showing a dialog."""
+    editor = _make_editor()
+    _, p1, p2, p3 = _patch_page(editor)
+    try:
+        editor._current_path = "/tmp/test.py"
+        editor._code_editor.value = "content"
+        # Not dirty, so no confirm dialog should be called
+        with patch.object(editor, "_confirm_discard") as mock_confirm:
+            await editor._handle_close(None)
+            mock_confirm.assert_not_called()
+
+        assert editor.current_path is None
+        assert editor.value == DEFAULT_CODE
+        assert editor.dirty is False
+    finally:
+        _cleanup_patches(p1, p2, p3)
+
+
+@pytest.mark.asyncio
+async def test_handle_close_closes_diff_pane():
+    """Close should also close an open diff pane."""
+    editor = _make_editor()
+    _, p1, p2, p3 = _patch_page(editor)
+    try:
+        editor._diff_pane._is_open = True
+        await editor._handle_close(None)
+        assert editor._diff_pane.is_open is False
+        assert editor._diff_btn.icon_color is None
+    finally:
+        _cleanup_patches(p1, p2, p3)
+
+
+def test_toggle_diff_pane_open():
+    editor = _make_editor()
+    _, p1, p2, p3 = _patch_page(editor)
+    try:
+        assert editor._diff_pane.is_open is False
+        editor._toggle_diff_pane()
+        assert editor._diff_pane.is_open is True
+        assert editor._diff_btn.icon_color == ft.Colors.BLUE
+    finally:
+        _cleanup_patches(p1, p2, p3)
+
+
+def test_toggle_diff_pane_close():
+    editor = _make_editor()
+    _, p1, p2, p3 = _patch_page(editor)
+    try:
+        editor._diff_pane._is_open = True
+        editor._toggle_diff_pane()
+        assert editor._diff_pane.is_open is False
+        assert editor._diff_btn.icon_color is None
+    finally:
+        _cleanup_patches(p1, p2, p3)
+
+
+def test_on_diff_closed_resets_button():
+    editor = _make_editor()
+    _, p1, p2, p3 = _patch_page(editor)
+    try:
+        editor._diff_btn.icon_color = ft.Colors.BLUE
+        editor._on_diff_closed()
+        assert editor._diff_btn.icon_color is None
+    finally:
+        _cleanup_patches(p1, p2, p3)
+
+
+def test_handle_change_reverts_to_clean():
+    """If content is edited back to match saved content, dirty state should clear."""
+    editor = _make_editor(value="original")
+    _, p1, p2, p3 = _patch_page(editor)
+    try:
+        editor._last_saved_content = "original"
+        # First make it dirty
+        editor._code_editor.value = "modified"
+        editor._handle_change(None)
+        assert editor.dirty is True
+
+        # Now revert to original
+        editor._code_editor.value = "original"
+        editor._handle_change(None)
+        assert editor.dirty is False
+        assert editor._save_btn.disabled is True
+    finally:
+        _cleanup_patches(p1, p2, p3)
+
+
+def test_handle_change_recomputes_diff_when_open():
+    editor = _make_editor(value="original")
+    _, p1, p2, p3 = _patch_page(editor)
+    try:
+        editor._diff_pane._is_open = True
+        with patch.object(editor._diff_pane, "recompute") as mock_recompute:
+            editor._code_editor.value = "modified"
+            editor._handle_change(None)
+            mock_recompute.assert_called_once()
+    finally:
+        _cleanup_patches(p1, p2, p3)
