@@ -162,6 +162,10 @@ editor.search_bar      # the SearchReplaceBar control
 | Help               | F1    | F1              |
 | Close Search Bar   | Esc   | Esc             |
 
+## Contributing
+
+Contributions are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+
 ## License
 
 MIT
