@@ -1,5 +1,9 @@
 # fce-enhanced
 
+[![PyPI version](https://img.shields.io/pypi/v/fce-enhanced)](https://pypi.org/project/fce-enhanced/)
+[![Python versions](https://img.shields.io/pypi/pyversions/fce-enhanced)](https://pypi.org/project/fce-enhanced/)
+[![License](https://img.shields.io/pypi/l/fce-enhanced)](https://github.com/oktl/flet-fce-enhanced/blob/main/LICENSE)
+
 An enhanced [Flet](https://flet.dev) CodeEditor control with file I/O, search/replace, syntax highlighting, and theme selection.
 
 Built on top of [`flet-code-editor`](https://pypi.org/project/flet-code-editor/), adding a full-featured editing experience you can drop into any Flet app or run standalone. This project was created to explore and showcase what's possible with Flet — building a desktop-quality code editor entirely in Python.
