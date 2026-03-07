@@ -20,7 +20,7 @@ class SearchReplaceBar(ft.Column):
         set_selection: Callback ``(base_offset, extent_offset)`` to highlight a match.
         replace_text: Callback ``(new_full_text)`` to replace the entire editor content.
         focus_editor: Callback to give focus back to the editor (for explicit navigation).
-        on_close: Callback invoked when the bar is dismissed (e.g. to refocus the editor).
+        on_close: Callback invoked when the bar is dismissed (e.g. to update page layout).
     """
 
     def __init__(
@@ -338,6 +338,4 @@ class SearchReplaceBar(ft.Column):
             )
 
         self._replace_text(new_text)
-        self._compute_matches()
-        self._update_match_display()
-        self._safe_update()
+        self.recompute()

@@ -426,7 +426,6 @@ class EnhancedCodeEditor(ft.Column):
 
         if self._diff_pane.is_open:
             self._diff_pane.close()
-            self._diff_btn.icon_color = None
 
         self._current_path = path
         self._last_saved_content = content
@@ -579,7 +578,6 @@ class EnhancedCodeEditor(ft.Column):
 
         if self._diff_pane.is_open:
             self._diff_pane.close()
-            self._diff_btn.icon_color = None
 
         self._current_path = None
         self._dirty = False
@@ -733,7 +731,6 @@ class EnhancedCodeEditor(ft.Column):
 
     def _close_search(self) -> None:
         self._search_bar.close()
-        self.page.update()
 
     def _on_search_closed(self) -> None:
         """Called by SearchReplaceBar.close() — just update layout, don't call close again."""
@@ -746,10 +743,8 @@ class EnhancedCodeEditor(ft.Column):
             self._diff_pane.close()
         else:
             self._diff_pane.open()
-        self._diff_btn.icon_color = (
-            TOGGLE_ACTIVE_COLOR if self._diff_pane.is_open else None
-        )
-        self.page.update()
+            self._diff_btn.icon_color = TOGGLE_ACTIVE_COLOR
+            self.page.update()
 
     def _on_diff_closed(self) -> None:
         """Called by DiffPane.close() — update button state and layout."""

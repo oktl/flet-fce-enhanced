@@ -23,7 +23,7 @@ class DiffPane(ft.Column):
     Args:
         get_original_text: Callback returning the last-saved file content.
         get_current_text: Callback returning the current editor content.
-        on_close: Callback invoked when the pane is dismissed.
+        on_close: Callback invoked when the pane is dismissed (e.g. to update page layout).
         code_theme: Initial code theme (should match the main editor).
     """
 
