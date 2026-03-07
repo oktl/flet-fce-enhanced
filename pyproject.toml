@@ -1,6 +1,6 @@
 [project]
 name = "fce-enhanced"
-version = "0.1.0"
+version = "0.1.1"
 description = "Enhanced Flet CodeEditor with file open/save/save-as/close/search and replace capabilities"
 readme = "README.md"
 authors = [
@@ -23,6 +23,7 @@ classifiers = [
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Topic :: Software Development :: Libraries :: Python Modules",
     "Topic :: Text Editors",
     "Operating System :: OS Independent",
