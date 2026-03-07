@@ -7,12 +7,36 @@ authors = [
     { name = "Tim Lang", email = "ttim.lang@gmail.com" }
 ]
 license = { text = "MIT" }
+keywords = [
+    "flet",
+    "code-editor",
+    "syntax-highlighting",
+    "text-editor",
+    "gui",
+    "flutter",
+]
 requires-python = ">=3.12"
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Text Editors",
+    "Operating System :: OS Independent",
+]
 dependencies = [
     "flet>=0.81.0",
     "flet-code-editor>=0.81.0",
     "loguru>=0.7",    
 ]
+
+[project.urls]
+Homepage = "https://github.com/oktl/flet-fce-enhanced"
+Repository = "https://github.com/oktl/flet-fce-enhanced"
+"Bug Tracker" = "https://github.com/oktl/flet-fce-enhanced/issues"
 
 [project.scripts]
 fce-enhanced = "fce_enhanced.editor:run"
@@ -34,7 +58,7 @@ dev = [
 python_files = "test_*.py"
 python_classes = "Test*"
 python_functions = "test_*"
-addopts = "-v --tb=short --strict-markers -ra --cov=app --cov-report=term-missing --cov-report=html"
+addopts = "-v --tb=short --strict-markers -ra --cov=fce_enhanced --cov-report=term-missing --cov-report=html"
 testpaths = ["tests"]
 markers = [
     "asyncio: marks tests as async (requires pytest-asyncio)",

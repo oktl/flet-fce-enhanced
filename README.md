@@ -4,12 +4,24 @@ An enhanced [Flet](https://flet.dev) CodeEditor control with file I/O, search/re
 
 Built on top of [`flet-code-editor`](https://pypi.org/project/flet-code-editor/), adding a full-featured editing experience you can drop into any Flet app or run standalone. This project was created to explore and showcase what's possible with Flet — building a desktop-quality code editor entirely in Python.
 
+![fce-enhanced screenshot](https://raw.githubusercontent.com/oktl/flet-fce-enhanced/main/docs/images/Screenshot.png)
+
 ## Install
 
 ```bash
+pip install fce-enhanced
+```
+
+Or with uv:
+
+```bash
+uv add fce-enhanced
+```
+
+### Development setup
+
+```bash
 git clone https://github.com/oktl/flet-fce-enhanced.git
-# or GitHub CLI: 
-gh repo clone oktl/flet-fce-enhanced
 cd flet-fce-enhanced
 uv sync
 source .venv/bin/activate
