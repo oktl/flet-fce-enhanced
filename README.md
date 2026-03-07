@@ -3,6 +3,7 @@
 [![PyPI version](https://img.shields.io/pypi/v/fce-enhanced)](https://pypi.org/project/fce-enhanced/)
 [![Python versions](https://img.shields.io/pypi/pyversions/fce-enhanced)](https://pypi.org/project/fce-enhanced/)
 [![License](https://img.shields.io/pypi/l/fce-enhanced)](https://github.com/oktl/flet-fce-enhanced/blob/main/LICENSE)
+[![CI](https://github.com/oktl/flet-fce-enhanced/actions/workflows/ci.yml/badge.svg)](https://github.com/oktl/flet-fce-enhanced/actions/workflows/ci.yml)
 
 An enhanced [Flet](https://flet.dev) CodeEditor control with file I/O, search/replace, syntax highlighting, and theme selection.
 
