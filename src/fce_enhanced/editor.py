@@ -81,7 +81,7 @@ class EnhancedCodeEditor(ft.Column):
 
     def __init__(
         self,
-        language: fce.CodeLanguage = fce.CodeLanguage.PYTHON,
+        language: fce.CodeLanguage = fce.CodeLanguage.PLAINTEXT,
         value: str = DEFAULT_CODE,
         show_toolbar: bool = True,
         show_status_bar: bool = True,
@@ -105,6 +105,7 @@ class EnhancedCodeEditor(ft.Column):
         # --- State ---
         self._current_path: str | None = None
         self._dirty: bool = False
+        self._loading: bool = False
         self._last_saved_content: str = value
 
         # --- Defaults ---
@@ -428,18 +429,37 @@ class EnhancedCodeEditor(ft.Column):
             self._diff_pane.close()
 
         self._current_path = path
+        # Set _last_saved_content BEFORE updating value so that the
+        # on_change handler doesn't trigger _mark_dirty / self.update(),
+        # which would scroll the view to the bottom before we can reset
+        # the cursor position (visible with .py files where the language
+        # doesn't change and thus no re-render resets the scroll).
+        # Suppress _handle_change during loading so intermediate updates
+        # don't scroll the view to the bottom before we reset the cursor.
+        self._loading = True
         self._last_saved_content = content
-        self._code_editor.value = content
-        self._code_editor.language = language_for_path(path)
-        self._lang_btn.content = ft.Text(
-            self._language_display_name(self._code_editor.language), size=11
+        target_lang = language_for_path(path)
+        # Force the CodeEditor to a different language first and flush it
+        # to the widget, so that setting the real language afterwards
+        # always triggers a full re-render (which resets scroll to top).
+        dummy_lang = (
+            fce.CodeLanguage.PLAINTEXT
+            if target_lang != fce.CodeLanguage.PLAINTEXT
+            else fce.CodeLanguage.PYTHON
         )
-        self._mark_clean(content)
-        await self._code_editor.focus()
-        await asyncio.sleep(0.05)
-        self._code_editor.selection = ft.TextSelection(base_offset=0, extent_offset=0)
+        self._code_editor.language = dummy_lang
         with suppress(RuntimeError):
             self._code_editor.update()
+        await asyncio.sleep(0.05)
+        self._code_editor.value = content
+        self._code_editor.language = target_lang
+        self._lang_btn.content = ft.Text(
+            self._language_display_name(target_lang), size=11
+        )
+        self._code_editor.selection = ft.TextSelection(base_offset=0, extent_offset=0)
+        self._loading = False
+        self._mark_clean(content)
+        await self._code_editor.focus()
 
     def _show_snackbar(self, message: str, *, is_error: bool = False) -> None:
         """Show a message to the user via a SnackBar with a dismiss button."""
@@ -846,6 +866,8 @@ class EnhancedCodeEditor(ft.Column):
         self.update()
 
     def _handle_change(self, _e):
+        if self._loading:
+            return
         content = self._code_editor.value or ""
         if content != self._last_saved_content:
             self._mark_dirty()
