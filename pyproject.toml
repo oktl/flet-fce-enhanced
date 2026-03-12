@@ -1,6 +1,6 @@
 [project]
 name = "fce-enhanced"
-version = "0.1.1"
+version = "0.1.2"
 description = "Enhanced Flet CodeEditor with file open/save/save-as/close/search and replace capabilities"
 readme = "README.md"
 authors = [

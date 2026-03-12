@@ -4,6 +4,30 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.1.2] - 2026-03-12
+
+### Added
+
+- Gutter toggle — show/hide the line-number gutter via toolbar button, keyboard shortcut (⇧⌘G / Ctrl+Shift+G), or command palette
+- `show_gutter` constructor parameter for `EnhancedCodeEditor`
+
+### Changed
+
+- Increase standalone app window height for better default experience
+
+## [0.1.1] - 2026-03-10
+
+### Added
+
+- Python 3.14 support
+
+### Fixed
+
+- File open scrolling to bottom when language unchanged
+- Search Enter key skipping first match
+- Inconsistencies between SearchReplaceBar and DiffPane APIs
+- SearchReplaceBar.recompute() now calls _safe_update() internally
+
 ## [0.1.0] - 2026-03-06
 
 ### Added
