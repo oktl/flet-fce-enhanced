@@ -4,6 +4,19 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.1.3] - 2026-03-12
+
+### Changed
+
+- Fix `language` constructor default from `PYTHON` to `PLAINTEXT` in README
+- Document all public exports from `fce_enhanced` package
+- Expand `on_title_change` callback documentation
+- Add Ruff on Save behavior details (silent skip, snackbar warnings, auto-reload)
+- Add platform notes for native file dialogs
+- Improve Search & Replace docs (whole word, Enter navigation, Replace All)
+- Note that Command Palette, Theme Selector, and Language Selector are searchable
+- Change theme count to "80+" to avoid maintenance
+
 ## [0.1.2] - 2026-03-12
 
 ### Added
