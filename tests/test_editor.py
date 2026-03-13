@@ -1309,3 +1309,125 @@ def test_handle_change_recomputes_diff_when_open():
             mock_recompute.assert_called_once()
     finally:
         _cleanup_patches(p1, p2, p3)
+
+
+# --- Revert to Saved ---
+
+
+def test_revert_btn_disabled_by_default():
+    editor = _make_editor()
+    assert editor._revert_btn.disabled is True
+
+
+def test_revert_btn_enabled_when_dirty():
+    editor = _make_editor(value="original")
+    _, p1, p2, p3 = _patch_page(editor)
+    try:
+        editor._code_editor.value = "modified"
+        editor._handle_change(None)
+        assert editor._revert_btn.disabled is False
+    finally:
+        _cleanup_patches(p1, p2, p3)
+
+
+@pytest.mark.asyncio
+async def test_handle_revert_restores_content():
+    editor = _make_editor(value="original")
+    _, p1, p2, p3 = _patch_page(editor)
+    try:
+        editor._code_editor.value = "modified"
+        editor._handle_change(None)
+        assert editor.dirty is True
+
+        with patch(
+            "fce_enhanced.editor.confirm_revert",
+            new_callable=AsyncMock,
+            return_value=True,
+        ):
+            await editor._handle_revert(None)
+
+        assert editor.value == "original"
+        assert editor.dirty is False
+        assert editor._revert_btn.disabled is True
+    finally:
+        _cleanup_patches(p1, p2, p3)
+
+
+@pytest.mark.asyncio
+async def test_handle_revert_cancelled():
+    editor = _make_editor(value="original")
+    _, p1, p2, p3 = _patch_page(editor)
+    try:
+        editor._code_editor.value = "modified"
+        editor._handle_change(None)
+
+        with patch(
+            "fce_enhanced.editor.confirm_revert",
+            new_callable=AsyncMock,
+            return_value=False,
+        ):
+            await editor._handle_revert(None)
+
+        assert editor.value == "modified"
+        assert editor.dirty is True
+    finally:
+        _cleanup_patches(p1, p2, p3)
+
+
+@pytest.mark.asyncio
+async def test_handle_revert_not_dirty_noop():
+    editor = _make_editor(value="original")
+    _, p1, p2, p3 = _patch_page(editor)
+    try:
+        with patch(
+            "fce_enhanced.editor.confirm_revert", new_callable=AsyncMock
+        ) as mock_confirm:
+            await editor._handle_revert(None)
+            mock_confirm.assert_not_called()
+
+        assert editor.value == "original"
+    finally:
+        _cleanup_patches(p1, p2, p3)
+
+
+@pytest.mark.asyncio
+async def test_handle_revert_closes_diff_pane():
+    editor = _make_editor(value="original")
+    _, p1, p2, p3 = _patch_page(editor)
+    try:
+        editor._code_editor.value = "modified"
+        editor._handle_change(None)
+        editor._diff_pane._is_open = True
+
+        with (
+            patch(
+                "fce_enhanced.editor.confirm_revert",
+                new_callable=AsyncMock,
+                return_value=True,
+            ),
+            patch.object(editor._diff_pane, "close") as mock_close,
+        ):
+            await editor._handle_revert(None)
+            mock_close.assert_called_once()
+    finally:
+        _cleanup_patches(p1, p2, p3)
+
+
+@pytest.mark.asyncio
+async def test_keyboard_shortcut_shift_r():
+    editor = _make_editor(value="original")
+    _, p1, p2, p3 = _patch_page(editor)
+    try:
+        with patch.object(
+            editor, "_handle_revert", new_callable=AsyncMock
+        ) as mock_revert:
+            event = MagicMock(spec=ft.KeyboardEvent)
+            event.key = "r"
+            event.meta = True
+            event.ctrl = False
+            event.shift = True
+            event.alt = False
+            await editor._handle_keyboard(event)
+            mock_revert.assert_called_once_with(None)
+    finally:
+        _cleanup_patches(p1, p2, p3)

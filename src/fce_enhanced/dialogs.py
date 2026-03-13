@@ -128,6 +128,49 @@ async def confirm_discard(page: ft.Page) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Confirm-revert dialog
+# ---------------------------------------------------------------------------
+
+
+async def confirm_revert(page: ft.Page) -> bool:
+    """Show a Revert / Cancel dialog.
+
+    Returns:
+        ``True`` if the user chose to revert, ``False`` if cancelled.
+    """
+    choice: list[bool | None] = [None]
+
+    def _on_choice(revert: bool):
+        def handler(_e):
+            choice[0] = revert
+            dlg.open = False
+            page.update()
+
+        return handler
+
+    dlg = ft.AlertDialog(
+        modal=True,
+        title=ft.Text("Revert to Saved"),
+        content=ft.Text("Discard all changes and revert to the last saved version?"),
+        actions=[
+            ft.TextButton("Revert", on_click=_on_choice(True)),
+            ft.TextButton("Cancel", on_click=_on_choice(False)),
+        ],
+        actions_alignment=ft.MainAxisAlignment.END,
+    )
+    page.overlay.append(dlg)
+    dlg.open = True
+    page.update()
+
+    while choice[0] is None:
+        await asyncio.sleep(0.05)
+
+    page.overlay.remove(dlg)
+    page.update()
+    return choice[0]
+
+
+# ---------------------------------------------------------------------------
 # Theme dialog
 # ---------------------------------------------------------------------------
 

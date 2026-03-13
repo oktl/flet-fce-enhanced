@@ -9,6 +9,7 @@ HELP_TEXT = """\
 | Save | ⌘S | Ctrl+S |
 | Save As | ⇧⌘S | Ctrl+Shift+S |
 | Close File | ⌘W | Ctrl+W |
+| Revert to Saved | ⇧⌘R | Ctrl+Shift+R |
 | Find | ⌘F | Ctrl+F |
 | Find & Replace | ⌥⌘F | Ctrl+H |
 | Go to Line | ⌘G | Ctrl+G |
@@ -24,7 +25,7 @@ HELP_TEXT = """\
 
 ## Toolbar
 
-- **Open / Save / Save As / Close** — file operations
+- **Open / Save / Save As / Close / Revert** — file operations
 - **Find** — open the search bar (toggle replace with the expand button)
 - **Diff** — toggle a unified diff pane showing changes since last save
 - **Go to Line** — jump to a specific line number

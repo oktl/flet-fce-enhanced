@@ -22,6 +22,7 @@ from loguru import logger
 
 from fce_enhanced.dialogs import (
     confirm_discard,
+    confirm_revert,
     goto_line_dialog,
     open_command_palette,
     show_help_dialog,
@@ -158,6 +159,13 @@ class EnhancedCodeEditor(ft.Column):
             on_click=self._handle_save,
             disabled=True,
         )
+        self._revert_btn = ft.IconButton(
+            ft.Icons.SETTINGS_BACKUP_RESTORE,
+            icon_size=ICON_SIZE,
+            tooltip="Revert to Saved (⇧⌘R)",
+            on_click=self._handle_revert,
+            disabled=True,
+        )
         self._lock_btn = ft.IconButton(
             ft.Icons.LOCK_OPEN,
             icon_size=ICON_SIZE,
@@ -261,6 +269,7 @@ class EnhancedCodeEditor(ft.Column):
                     tooltip="Close File (⌘W) ",
                     on_click=self._handle_close,
                 ),
+                self._revert_btn,
                 self.appbar_divder,
                 ft.IconButton(
                     ft.Icons.SEARCH,
@@ -407,12 +416,14 @@ class EnhancedCodeEditor(ft.Column):
         if not self._dirty:
             self._dirty = True
             self._save_btn.disabled = False
+            self._revert_btn.disabled = False
             self._update_title()
 
     def _mark_clean(self, content: str):
         self._dirty = False
         self._last_saved_content = content
         self._save_btn.disabled = True
+        self._revert_btn.disabled = True
         self._update_title()
         if self._diff_pane.is_open:
             self._diff_pane.recompute()
@@ -636,6 +647,36 @@ class EnhancedCodeEditor(ft.Column):
         self.update()
         await self._code_editor.focus()
 
+    # --- Revert to saved ---
+
+    async def _handle_revert(self, _e):
+        if not self._dirty:
+            return
+        confirmed = await confirm_revert(self.page)
+        if not confirmed:
+            return
+        if self._diff_pane.is_open:
+            self._diff_pane.close()
+        self._loading = True
+        # Force a full re-render via dummy language swap (same as _handle_open)
+        # so the widget resets scroll position to the top.
+        current_lang = self._code_editor.language
+        dummy_lang = (
+            fce.CodeLanguage.PLAINTEXT
+            if current_lang != fce.CodeLanguage.PLAINTEXT
+            else fce.CodeLanguage.PYTHON
+        )
+        self._code_editor.language = dummy_lang
+        with suppress(RuntimeError):
+            self._code_editor.update()
+        await asyncio.sleep(0.05)
+        self._code_editor.value = self._last_saved_content
+        self._code_editor.language = current_lang
+        self._code_editor.selection = ft.TextSelection(base_offset=0, extent_offset=0)
+        self._loading = False
+        self._mark_clean(self._last_saved_content)
+        await self._code_editor.focus()
+
     # --- Theme selection ---
 
     def _handle_theme_click(self, _e):
@@ -684,6 +725,7 @@ class EnhancedCodeEditor(ft.Column):
             ("Save", f"{mod}S", self._handle_save),
             ("Save As", f"{shift_mod}S", self._handle_save_as),
             ("Close File", f"{mod}W", self._handle_close),
+            ("Revert to Saved", f"{shift_mod}R", self._handle_revert),
             ("Find", f"{mod}F", lambda _: self._open_search(with_replace=False)),
             (
                 "Find and Replace",
@@ -858,6 +900,8 @@ class EnhancedCodeEditor(ft.Column):
             await self._handle_open(None)
         elif key == "W":
             await self._handle_close(None)
+        elif key == "R" and e.shift:
+            await self._handle_revert(None)
         elif key == "L" and e.shift:
             self._handle_language_click(None)
         elif key == "L":
@@ -915,6 +959,7 @@ class EnhancedCodeEditor(ft.Column):
         elif self._dirty:
             self._dirty = False
             self._save_btn.disabled = True
+            self._revert_btn.disabled = True
             self._update_title()
 
         if self._search_bar.is_open:

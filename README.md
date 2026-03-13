@@ -143,7 +143,7 @@ The package also exports these utilities from `fce_enhanced`:
 
 ## Features
 
-- **File operations** — Open, Save, Save As, Close with unsaved-changes confirmation
+- **File operations** — Open, Save, Save As, Close, and Revert to Saved with unsaved-changes confirmation
 - **Native file dialogs** — AppleScript dialogs on macOS (with extension filtering), Flet's built-in FilePicker on other platforms
 - **Search & Replace** — Find toolbar with match counting, case sensitivity toggle, whole word matching, prev/next navigation (Enter navigates to next match), Replace and Replace All
 - **Command Palette** — Searchable list of all available commands; type to filter (Cmd+Shift+P / Ctrl+Shift+P)
@@ -167,6 +167,7 @@ The package also exports these utilities from `fce_enhanced`:
 | Save               | ⌘S    | Ctrl+S          |
 | Save As            | ⇧⌘S   | Ctrl+Shift+S    |
 | Close File         | ⌘W    | Ctrl+W          |
+| Revert to Saved    | ⇧⌘R   | Ctrl+Shift+R    |
 | Find               | ⌘F    | Ctrl+F          |
 | Find and Replace   | ⌥⌘F   | Ctrl+H          |
 | Toggle Diff        | ⌘D    | Ctrl+D          |
