@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.1.4] - 2026-03-13
+
+### Fixed
+
+- Revert to Saved now resets cursor and scroll position to the top of the file (previously jumped to end)
+
+### Changed
+
+- Add Revert to Saved to README features and keyboard shortcuts table
+
 ## [0.1.3] - 2026-03-12
 
 ### Changed
