@@ -31,7 +31,8 @@ classifiers = [
 dependencies = [
     "flet>=0.81.0",
     "flet-code-editor>=0.81.0",
-    "loguru>=0.7",    
+    "loguru>=0.7",
+    "ruff>=0.15.4",
 ]
 
 [project.urls]

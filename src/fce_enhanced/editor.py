@@ -78,7 +78,7 @@ class EnhancedCodeEditor(ft.Column):
         on_title_change: Callback fired with (display_path, name, is_dirty) when
             the file title or dirty state changes.
         ruff_on_save: Run ruff check --fix and ruff format on Python files
-            after saving. Requires ruff to be installed. Defaults to True.
+            after saving. Requires ruff to be installed. Defaults to False.
     """
 
     def __init__(
@@ -95,7 +95,7 @@ class EnhancedCodeEditor(ft.Column):
         text_style: ft.TextStyle | None = None,
         gutter_style: fce.GutterStyle | None = None,
         on_title_change=None,
-        ruff_on_save: bool = True,
+        ruff_on_save: bool = False,
         **kwargs,
     ):
         super().__init__(**kwargs)
