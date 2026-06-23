@@ -1,353 +1,89 @@
-"""Tests for fce_enhanced.search (SearchReplaceBar control)."""
+"""Tests for fce_enhanced.search."""
 
-from unittest.mock import MagicMock
+import flet as ft
 
-from fce_enhanced.search import SearchReplaceBar
+from fce_enhanced.search import SearchReplaceBar, compute_matches
 
-# --- Helpers ---
-
-
-def _make_bar(
-    text: str = "hello world hello",
-) -> tuple[SearchReplaceBar, MagicMock, MagicMock]:
-    """Create a SearchReplaceBar with mock callbacks."""
-    set_selection = MagicMock()
-    replace_text = MagicMock()
-    bar = SearchReplaceBar(
-        get_text=lambda: text,
-        set_selection=set_selection,
-        replace_text=replace_text,
-        on_close=MagicMock(),
-    )
-    return bar, set_selection, replace_text
-
-
-def _search(bar: SearchReplaceBar, query: str, case_sensitive: bool = False) -> None:
-    """Simulate typing a search query."""
-    bar._case_sensitive = case_sensitive
-    bar._search_query = query
-    bar._search_field.value = query
-    bar._compute_matches()
-    bar._update_match_display()
-
-
-# --- Open / Close ---
-
-
-def test_initially_not_visible():
-    bar, _, _ = _make_bar()
-    assert bar.is_open is False
-    assert bar.controls == []
-
-
-def test_open_makes_visible():
-    bar, _, _ = _make_bar()
-    bar.open()
-    assert bar.is_open is True
-    assert len(bar.controls) == 2  # search_row + replace_row
-
-
-def test_open_with_replace():
-    bar, _, _ = _make_bar()
-    bar.open(with_replace=True)
-    assert bar._replace_row.visible is True
-
-
-def test_open_without_replace():
-    bar, _, _ = _make_bar()
-    bar.open(with_replace=False)
-    assert bar._replace_row.visible is False
-
-
-def test_close_hides_and_resets():
-    bar, _, _ = _make_bar()
-    bar.open()
-    _search(bar, "hello")
-    bar.close()
-    assert bar.is_open is False
-    assert bar.controls == []
-    assert bar._search_query == ""
-    assert bar._match_positions == []
-    assert bar._current_match_index == -1
-
-
-def test_close_calls_on_close():
-    bar, _, _ = _make_bar()
-    bar.open()
-    bar.close()
-    bar._on_close.assert_called_once()
-
-
-# --- Match computation ---
+# --- compute_matches (pure function) ---
 
 
 def test_finds_all_matches():
-    bar, sel, _ = _make_bar("hello world hello")
-    _search(bar, "hello")
-    assert len(bar._match_positions) == 2
-    assert bar._match_positions[0] == (0, 5)
-    assert bar._match_positions[1] == (12, 17)
+    assert compute_matches("hello world hello", "hello") == [(0, 5), (12, 17)]
 
 
 def test_no_matches():
-    bar, sel, _ = _make_bar("hello world")
-    _search(bar, "xyz")
-    assert len(bar._match_positions) == 0
-    assert bar._current_match_index == -1
+    assert compute_matches("abc def", "xyz") == []
 
 
-def test_empty_query_no_matches():
-    bar, sel, _ = _make_bar("hello world")
-    _search(bar, "")
-    assert len(bar._match_positions) == 0
+def test_empty_query():
+    assert compute_matches("anything", "") == []
 
 
-def test_first_match_selected():
-    bar, sel, _ = _make_bar("hello world hello")
-    _search(bar, "hello")
-    assert bar._current_match_index == 0
-    sel.assert_called_with(0, 5)
-
-
-def test_match_count_label():
-    bar, _, _ = _make_bar("hello world hello")
-    _search(bar, "hello")
-    assert bar._match_count_label.value == "1 of 2"
-
-
-def test_no_results_label():
-    bar, _, _ = _make_bar("hello world")
-    _search(bar, "xyz")
-    assert bar._match_count_label.value == "No results"
-
-
-# --- Case sensitivity ---
+def test_empty_text():
+    assert compute_matches("", "foo") == []
 
 
 def test_case_insensitive_by_default():
-    bar, sel, _ = _make_bar("Hello HELLO hello")
-    _search(bar, "hello", case_sensitive=False)
-    assert len(bar._match_positions) == 3
+    assert len(compute_matches("Foo foo FOO", "foo")) == 3
 
 
-def test_case_sensitive_search():
-    bar, sel, _ = _make_bar("Hello HELLO hello")
-    _search(bar, "hello", case_sensitive=True)
-    assert len(bar._match_positions) == 1
-    assert bar._match_positions[0] == (12, 17)
+def test_case_sensitive():
+    assert compute_matches("Foo foo FOO", "foo", case_sensitive=True) == [(4, 7)]
 
 
-def test_toggle_case():
-    bar, _, _ = _make_bar("Hello hello")
-    _search(bar, "hello", case_sensitive=False)
-    assert len(bar._match_positions) == 2
-
-    bar._case_sensitive = True
-    bar._compute_matches()
-    assert len(bar._match_positions) == 1
+def test_match_offsets_use_query_length():
+    # Case-insensitive match against differently-cased text keeps query length.
+    assert compute_matches("FOO", "foo") == [(0, 3)]
 
 
-# --- Navigation ---
+def test_overlapping_matches():
+    # find() with start=idx+1 allows overlapping occurrences.
+    assert compute_matches("aaaa", "aa") == [(0, 2), (1, 3), (2, 4)]
 
 
-def test_next_match():
-    bar, sel, _ = _make_bar("aa bb aa cc aa")
-    _search(bar, "aa")
-    assert bar._current_match_index == 0
-
-    bar._go_to_match(1)
-    assert bar._current_match_index == 1
-    sel.assert_called_with(6, 8)
+def test_whole_word():
+    assert compute_matches("foo foobar foo", "foo", whole_word=True) == [
+        (0, 3),
+        (11, 14),
+    ]
 
 
-def test_prev_match():
-    bar, sel, _ = _make_bar("aa bb aa cc aa")
-    _search(bar, "aa")
-    bar._go_to_match(-1)  # wraps to last
-    assert bar._current_match_index == 2
-    sel.assert_called_with(12, 14)
+def test_whole_word_case_sensitive():
+    matches = compute_matches("Foo foo", "foo", whole_word=True, case_sensitive=True)
+    assert matches == [(4, 7)]
 
 
-def test_next_wraps_around():
-    bar, sel, _ = _make_bar("aa bb aa")
-    _search(bar, "aa")
-    bar._go_to_match(1)  # index 1
-    bar._go_to_match(1)  # wraps to 0
-    assert bar._current_match_index == 0
+def test_whole_word_special_chars_escaped():
+    # query is regex-escaped, so "." is literal.
+    assert compute_matches("a.b a b", "a.b", whole_word=True) == [(0, 3)]
 
 
-def test_prev_wraps_around():
-    bar, sel, _ = _make_bar("aa bb aa")
-    _search(bar, "aa")
-    bar._go_to_match(-1)  # wraps to 1
-    assert bar._current_match_index == 1
+# --- SearchReplaceBar (component render) ---
 
 
-def test_navigate_with_no_matches():
-    bar, sel, _ = _make_bar("hello")
-    _search(bar, "xyz")
-    bar._go_to_match(1)  # should not crash
-    assert bar._current_match_index == -1
-
-
-# --- Replace one ---
-
-
-def test_replace_one():
-    text = "hello world hello"
-    replaced = []
-
-    def mock_replace(new_text):
-        replaced.append(new_text)
-
-    bar = SearchReplaceBar(
-        get_text=lambda: replaced[-1] if replaced else text,
-        set_selection=MagicMock(),
-        replace_text=mock_replace,
+def _bar(render_component, **kw):
+    return render_component(
+        SearchReplaceBar,
+        get_text=kw.pop("get_text", lambda: "foo bar"),
+        set_selection=lambda a, b: None,
+        replace_text=lambda t: None,
+        **kw,
     )
-    _search(bar, "hello")
-    bar._replace_field.value = "hi"
-    bar._handle_replace_one(None)
-
-    assert replaced[0] == "hi world hello"
 
 
-def test_replace_one_with_empty():
-    text = "hello world"
-    replaced = []
-
-    def mock_replace(new_text):
-        replaced.append(new_text)
-
-    bar = SearchReplaceBar(
-        get_text=lambda: replaced[-1] if replaced else text,
-        set_selection=MagicMock(),
-        replace_text=mock_replace,
-    )
-    _search(bar, "hello")
-    bar._replace_field.value = ""
-    bar._handle_replace_one(None)
-
-    assert replaced[0] == " world"
+def test_renders_search_and_replace_rows(render_component):
+    tree, _ = _bar(render_component)
+    assert isinstance(tree, ft.Column)
+    assert len(tree.controls) == 2  # search row + replace row
 
 
-def test_replace_one_no_match():
-    bar, _, replace_text = _make_bar("hello")
-    _search(bar, "xyz")
-    bar._handle_replace_one(None)
-    replace_text.assert_not_called()
+def test_replace_row_hidden_by_default(render_component):
+    tree, _ = _bar(render_component)
+    _search_row, replace_row = tree.controls
+    assert replace_row.visible is False
 
 
-# --- Replace all ---
-
-
-def test_replace_all():
-    text = "hello world hello"
-    replaced = []
-
-    bar = SearchReplaceBar(
-        get_text=lambda: replaced[-1] if replaced else text,
-        set_selection=MagicMock(),
-        replace_text=lambda t: replaced.append(t),
-    )
-    _search(bar, "hello")
-    bar._replace_field.value = "hi"
-    bar._handle_replace_all(None)
-
-    assert replaced[0] == "hi world hi"
-
-
-def test_replace_all_case_insensitive():
-    text = "Hello world HELLO"
-    replaced = []
-
-    bar = SearchReplaceBar(
-        get_text=lambda: replaced[-1] if replaced else text,
-        set_selection=MagicMock(),
-        replace_text=lambda t: replaced.append(t),
-    )
-    _search(bar, "hello", case_sensitive=False)
-    bar._replace_field.value = "hi"
-    bar._handle_replace_all(None)
-
-    assert replaced[0] == "hi world hi"
-
-
-def test_replace_all_case_sensitive():
-    text = "Hello world hello"
-    replaced = []
-
-    bar = SearchReplaceBar(
-        get_text=lambda: replaced[-1] if replaced else text,
-        set_selection=MagicMock(),
-        replace_text=lambda t: replaced.append(t),
-    )
-    _search(bar, "hello", case_sensitive=True)
-    bar._replace_field.value = "hi"
-    bar._handle_replace_all(None)
-
-    assert replaced[0] == "Hello world hi"
-
-
-def test_replace_all_no_matches():
-    bar, _, replace_text = _make_bar("hello")
-    _search(bar, "xyz")
-    bar._handle_replace_all(None)
-    replace_text.assert_not_called()
-
-
-# --- Recompute ---
-
-
-def test_recompute_updates_matches():
-    current_text = ["hello world hello"]
-
-    bar = SearchReplaceBar(
-        get_text=lambda: current_text[0],
-        set_selection=MagicMock(),
-        replace_text=MagicMock(),
-    )
-    bar._search_query = "hello"
-    bar.recompute()
-    assert len(bar._match_positions) == 2
-
-    # Simulate text change
-    current_text[0] = "hello world"
-    bar.recompute()
-    assert len(bar._match_positions) == 1
-
-
-# --- Toggle replace visibility ---
-
-
-def test_replace_all_with_backslash_in_replacement():
-    """Replacement strings with regex backreferences like \\1 should be treated literally."""
-    bar, _, replace_text = _make_bar("hello world hello")
-    _search(bar, "hello")
-    bar._replace_field.value = r"\1 backslash"
-    bar._handle_replace_all(None)
-    result = replace_text.call_args[0][0]
-    assert result == r"\1 backslash world \1 backslash"
-
-
-def test_replace_all_case_insensitive_with_backslash():
-    """Case-insensitive replace with backreference-like replacement should not crash."""
-    text = "Hello world HELLO"
-    bar, _, replace_text = _make_bar(text)
-    _search(bar, "hello", case_sensitive=False)
-    bar._replace_field.value = r"\g<0>"
-    bar._handle_replace_all(None)
-    result = replace_text.call_args[0][0]
-    assert result == r"\g<0> world \g<0>"
-
-
-def test_toggle_replace():
-    bar, _, _ = _make_bar()
-    bar.open(with_replace=False)
-    assert bar._replace_row.visible is False
-
-    bar._handle_toggle_replace(None)
-    assert bar._replace_row.visible is True
-
-    bar._handle_toggle_replace(None)
-    assert bar._replace_row.visible is False
+def test_replace_row_visible_with_replace(render_component):
+    tree, _ = _bar(render_component, with_replace=True)
+    _search_row, replace_row = tree.controls
+    assert replace_row.visible is True

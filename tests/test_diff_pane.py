@@ -1,66 +1,11 @@
-"""Tests for fce_enhanced.diff_pane (DiffPane control)."""
+"""Tests for fce_enhanced.diff_pane."""
 
-from unittest.mock import MagicMock
+import flet as ft
+import flet_code_editor as fce
 
 from fce_enhanced.diff_pane import DiffPane, compute_unified_diff
 
-# --- Helpers ---
-
-
-def _make_pane(
-    original: str = "hello\nworld\n",
-    current: str = "hello\nworld\n",
-) -> tuple[DiffPane, MagicMock]:
-    """Create a DiffPane with mock callbacks."""
-    on_close = MagicMock()
-    pane = DiffPane(
-        get_original_text=lambda: original,
-        get_current_text=lambda: current,
-        on_close=on_close,
-    )
-    return pane, on_close
-
-
-# --- Open / Close ---
-
-
-def test_initially_not_visible():
-    pane, _ = _make_pane()
-    assert pane.is_open is False
-    assert pane.controls == []
-
-
-def test_open_makes_visible():
-    pane, _ = _make_pane()
-    pane.open()
-    assert pane.is_open is True
-    assert len(pane.controls) == 3  # header_row + divider + diff_editor
-
-
-def test_close_hides_and_resets():
-    pane, _ = _make_pane(original="a\n", current="b\n")
-    pane.open()
-    pane.close()
-    assert pane.is_open is False
-    assert pane.controls == []
-    assert pane._diff_editor.value == ""
-    assert pane._stats_label.value == "No changes"
-
-
-def test_close_calls_on_close():
-    pane, on_close = _make_pane()
-    pane.open()
-    pane.close()
-    on_close.assert_called_once()
-
-
-def test_close_when_not_open_does_not_call_on_close():
-    pane, on_close = _make_pane()
-    pane.close()
-    on_close.assert_not_called()
-
-
-# --- compute_unified_diff ---
+# --- compute_unified_diff (pure function) ---
 
 
 def test_no_changes():
@@ -93,38 +38,54 @@ def test_modifications():
 
 
 def test_empty_to_content():
-    diff_text, added, removed = compute_unified_diff("", "hello\n")
+    _diff_text, added, removed = compute_unified_diff("", "hello\n")
     assert added > 0
     assert removed == 0
 
 
 def test_content_to_empty():
-    diff_text, added, removed = compute_unified_diff("hello\n", "")
+    _diff_text, added, removed = compute_unified_diff("hello\n", "")
     assert removed > 0
     assert added == 0
 
 
-# --- Recompute with mutable text ---
+# --- DiffPane (component render) ---
 
 
-def test_recompute_updates_on_text_change():
-    current = ["hello\n"]
-    pane = DiffPane(
-        get_original_text=lambda: "hello\n",
-        get_current_text=lambda: current[0],
+def _diff_editor(tree: ft.Column) -> fce.CodeEditor:
+    container = tree.controls[-1]
+    return container.content
+
+
+def test_renders_header_divider_container(render_component):
+    tree, _ = render_component(
+        DiffPane, original_text="hello\n", current_text="hello\n"
     )
-    pane.open()
-    assert pane._stats_label.value == "No changes"
-
-    current[0] = "hello\nworld\n"
-    pane.recompute()
-    assert pane._stats_label.value == "+1 / -0"
+    assert isinstance(tree, ft.Column)
+    assert [type(c).__name__ for c in tree.controls] == ["Row", "Divider", "Container"]
 
 
-def test_stats_label_format():
-    pane, _ = _make_pane(original="a\nb\nc\n", current="a\nx\ny\nz\n")
-    pane.open()
-    # b,c removed (-2), x,y,z added (+3)
-    stats = pane._stats_label.value
+def test_no_changes_stats(render_component):
+    tree, _ = render_component(
+        DiffPane, original_text="hello\n", current_text="hello\n"
+    )
+    stats = tree.controls[0].controls[2]
+    assert stats.value == "No changes"
+
+
+def test_change_stats(render_component):
+    tree, _ = render_component(
+        DiffPane, original_text="a\nb\nc\n", current_text="a\nx\ny\nz\n"
+    )
+    stats = tree.controls[0].controls[2].value
     assert stats.startswith("+")
     assert "/ -" in stats
+
+
+def test_diff_editor_is_readonly_diff_language(render_component):
+    tree, _ = render_component(DiffPane, original_text="a\n", current_text="b\n")
+    editor = _diff_editor(tree)
+    assert editor.read_only is True
+    assert editor.language == fce.CodeLanguage.DIFF
+    assert "-a" in editor.value
+    assert "+b" in editor.value

@@ -52,7 +52,7 @@ flet run src/fce_enhanced/editor.py path/to/file.py     # open a specific file o
 
 ### Embed in your own Flet app
 
-`EnhancedCodeEditor` is a standard `ft.Column` subclass — add it to any Flet page or layout just like any other control.
+`EnhancedCodeEditor` is a Flet **declarative component** (`@ft.component`). Render it with `page.render(...)` rather than `page.add(...)`.
 
 #### Minimal example
 
@@ -63,8 +63,7 @@ from fce_enhanced import EnhancedCodeEditor
 
 def main(page: ft.Page):
     page.title = "My Editor"
-    editor = EnhancedCodeEditor(expand=True)
-    page.add(editor)
+    page.render(lambda: EnhancedCodeEditor(expand=True))
 
 
 ft.run(main)
@@ -83,21 +82,49 @@ def main(page: ft.Page):
 
     def on_title_change(display_path, name, is_dirty):
         page.title = f"{name}{'*' if is_dirty else ''} — My Editor"
-        page.update()
 
-    editor = EnhancedCodeEditor(
-        language=fce.CodeLanguage.JAVASCRIPT,
-        value="console.log('hello');",
-        code_theme=fce.CodeTheme.MONOKAI,
-        on_title_change=on_title_change,
-        ruff_on_save=False,  # disable ruff (only applies to Python files)
-        expand=True,
+    page.render(
+        lambda: EnhancedCodeEditor(
+            language=fce.CodeLanguage.JAVASCRIPT,
+            value="console.log('hello');",
+            code_theme=fce.CodeTheme.MONOKAI,
+            on_title_change=on_title_change,
+            ruff_on_save=False,  # disable ruff (only applies to Python files)
+            expand=True,
+        )
     )
-    page.add(editor)
 
 
 ft.run(main)
 ```
+
+#### Driving the editor from code
+
+Because a component has no instance to call methods on, pass an `EditorHandle`
+to drive it imperatively (open a file, save, etc.) and read its live state:
+
+```python
+import sys
+import flet as ft
+from fce_enhanced import EditorHandle, EnhancedCodeEditor
+
+
+def main(page: ft.Page):
+    handle = EditorHandle()
+    initial = sys.argv[1] if len(sys.argv) > 1 else None
+    page.render(
+        lambda: EnhancedCodeEditor(
+            expand=True, handle=handle, initial_path=initial
+        )
+    )
+    # handle.open_path("/path/to/file"), handle.save(), handle.save_as(),
+    # handle.close(); read handle.value / handle.dirty / handle.current_path
+
+ft.run(main)
+```
+
+> `initial_path` opens a file automatically on mount — the simplest way to load
+> a file at startup without touching the handle.
 
 #### Constructor parameters
 
@@ -115,19 +142,24 @@ ft.run(main)
 | `text_style`                  | `TextStyle`    | `None`           | Text style for editor content              |
 | `gutter_style`                | `GutterStyle`  | `None`           | Style for the line number gutter           |
 | `on_title_change`             | `callable`     | `None`           | Callback `(display_path, name, is_dirty)` — fires on file open/close, save, and dirty-state changes. `display_path` is the home-relative path (e.g. `~/projects/foo.py`) or `"untitled"`. |
-| `ruff_on_save`                | `bool`         | `True`           | Auto-format Python files with ruff on save |
+| `ruff_on_save`                | `bool`         | `False`          | Auto-format Python files with ruff on save |
+| `initial_path`                | `str`          | `None`           | File to open automatically on mount        |
+| `handle`                      | `EditorHandle` | `None`           | Imperative handle for driving the editor   |
+| `expand`                      | `bool`         | `False`          | Expand the root column to fill its parent  |
 
-Any additional keyword arguments are passed through to `ft.Column`.
+#### Driving via `EditorHandle`
 
-#### Useful properties
+Pass an `EditorHandle` instance and the component populates it on every render:
 
 ```python
-editor.value           # current editor content (str)
-editor.current_path    # path of open file, or None
-editor.dirty           # True if there are unsaved changes
-editor.language        # current CodeLanguage
-editor.code_editor     # the underlying fce.CodeEditor control
-editor.search_bar      # the SearchReplaceBar control
+handle.open_path("/path/to/file")  # load a file (no dialog)
+handle.save()                      # save to current path
+handle.save_as()                   # save-as dialog
+handle.close()                     # close current file
+
+handle.value          # current editor content (str)
+handle.current_path   # path of open file, or None
+handle.dirty          # True if there are unsaved changes
 ```
 
 #### Other public exports
@@ -136,7 +168,11 @@ The package also exports these utilities from `fce_enhanced`:
 
 | Export | Description |
 | --- | --- |
-| `SearchReplaceBar` | Reusable search/replace control |
+| `EditorHandle` | Imperative handle for driving the editor component |
+| `SearchReplaceBar` | Reusable search/replace component |
+| `DiffPane` | Reusable unified-diff component |
+| `compute_matches()` | Pure function: find search matches in text |
+| `compute_unified_diff()` | Pure function: unified diff + add/remove counts |
 | `open_file()` / `save_file()` | Async platform-aware file dialogs |
 | `language_for_path()` | Detect `CodeLanguage` from a file path |
 | `EXTENSION_TO_LANGUAGE` | Dict mapping file extensions to `CodeLanguage` |

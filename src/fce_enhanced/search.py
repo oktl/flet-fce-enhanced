@@ -1,4 +1,4 @@
-"""Search & Replace bar for EnhancedCodeEditor."""
+"""Search & Replace bar for EnhancedCodeEditor (declarative)."""
 
 from __future__ import annotations
 
@@ -12,340 +12,232 @@ SEARCH_ICON_SIZE = 18
 SEARCH_BUTTON_STYLE = ft.ButtonStyle(text_style=ft.TextStyle(size=10))
 
 
-class SearchReplaceBar(ft.Column):
-    """A search/replace bar that communicates with an editor via callbacks.
+def compute_matches(
+    text: str,
+    query: str,
+    *,
+    case_sensitive: bool = False,
+    whole_word: bool = False,
+) -> list[tuple[int, int]]:
+    """Return ``(start, end)`` offsets of every occurrence of ``query`` in ``text``."""
+    if not query:
+        return []
+
+    matches: list[tuple[int, int]] = []
+    if whole_word:
+        pattern = r"\b" + re.escape(query) + r"\b"
+        flags = 0 if case_sensitive else re.IGNORECASE
+        for m in re.finditer(pattern, text, flags):
+            matches.append((m.start(), m.end()))
+    else:
+        if case_sensitive:
+            haystack, needle = text, query
+        else:
+            haystack, needle = text.lower(), query.lower()
+        start = 0
+        while True:
+            idx = haystack.find(needle, start)
+            if idx == -1:
+                break
+            matches.append((idx, idx + len(query)))
+            start = idx + 1
+    return matches
+
+
+@ft.component
+def SearchReplaceBar(
+    get_text: Callable[[], str],
+    set_selection: Callable[[int, int], None],
+    replace_text: Callable[[str], None],
+    focus_editor: Callable[[], None] | None = None,
+    on_close: Callable[[], None] | None = None,
+    with_replace: bool = False,
+    text_version: int = 0,
+) -> ft.Control:
+    """A search/replace bar that talks to an editor via callbacks.
+
+    Rendered only while open (the parent controls visibility via conditional
+    rendering). Match positions are derived from the current editor text on
+    every render via the pure :func:`compute_matches` function.
 
     Args:
-        get_text: Callback that returns the current editor content.
-        set_selection: Callback ``(base_offset, extent_offset)`` to highlight a match.
-        replace_text: Callback ``(new_full_text)`` to replace the entire editor content.
-        focus_editor: Callback to give focus back to the editor (for explicit navigation).
-        on_close: Callback invoked when the bar is dismissed (e.g. to update page layout).
+        get_text: Returns the current editor content.
+        set_selection: ``(base_offset, extent_offset)`` to highlight a match.
+        replace_text: ``(new_full_text)`` to replace the entire editor content.
+        focus_editor: Give focus back to the editor (for explicit navigation).
+        on_close: Invoked when the bar is dismissed.
+        with_replace: Whether the replace row starts visible.
+        text_version: Bumped by the parent when editor text changes, to force a
+            match recompute.
     """
+    query, set_query = ft.use_state("")
+    case_sensitive, set_case_sensitive = ft.use_state(False)
+    whole_word, set_whole_word = ft.use_state(False)
+    replace_visible, set_replace_visible = ft.use_state(with_replace)
+    current_index, set_current_index = ft.use_state(0)
 
-    def __init__(
-        self,
-        get_text: Callable[[], str],
-        set_selection: Callable[[int, int], None],
-        replace_text: Callable[[str], None],
-        focus_editor: Callable[[], None] | None = None,
-        on_close: Callable[[], None] | None = None,
-        **kwargs,
-    ):
-        super().__init__(**kwargs)
+    replace_ref = ft.use_ref("")
+    navigated_ref = ft.use_ref(False)
+    search_field_ref = ft.use_ref(lambda: ft.Ref())
 
-        # --- Callbacks ---
-        self._get_text = get_text
-        self._set_selection = set_selection
-        self._replace_text = replace_text
-        self._focus_editor = focus_editor
-        self._on_close = on_close
+    text = get_text()
+    matches = compute_matches(
+        text, query, case_sensitive=case_sensitive, whole_word=whole_word
+    )
+    count = len(matches)
+    idx = current_index if 0 <= current_index < count else 0
 
-        # --- State ---
-        self._search_query: str = ""
-        self._case_sensitive: bool = False
-        self._whole_word: bool = False
-        self._match_positions: list[tuple[int, int]] = []  # (start, end)
-        self._current_match_index: int = -1
-        self._navigated: bool = False
-        self._replace_visible: bool = False
+    # Highlight the current match whenever the match set or selection changes.
+    def _highlight() -> None:
+        if matches:
+            start, end = matches[idx]
+            set_selection(start, end)
 
-        # --- UI elements ---
-        self._search_field = ft.TextField(
-            hint_text="Find",
-            dense=True,
-            width=200,
-            text_size=13,
-            content_padding=ft.Padding.symmetric(horizontal=8, vertical=4),
-            border_color=ft.Colors.GREY_800,
-            focused_border_color=ft.Colors.GREY_600,
-            on_change=self._handle_search_change,
-            on_submit=self._handle_next,
-            border_width=0.5,
-        )
+    ft.use_effect(
+        _highlight, [query, case_sensitive, whole_word, idx, count, text_version]
+    )
 
-        self._match_count_label = ft.Text(
-            "No results", size=12, color=ft.Colors.GREY_600
-        )
+    # Focus the search field when the bar first mounts.
+    async def _focus_field() -> None:
+        ctrl = search_field_ref.current.current
+        if ctrl is not None:
+            with suppress(Exception):
+                await ctrl.focus()
 
-        self._case_btn = ft.IconButton(
-            icon=ft.Icons.FORMAT_SIZE,
-            tooltip="Match Case",
-            icon_size=SEARCH_ICON_SIZE,
-            selected=False,
-            on_click=self._handle_toggle_case,
-        )
+    ft.use_effect(_focus_field, [])
 
-        self._whole_word_btn = ft.IconButton(
-            icon=ft.Icons.ABC,
-            tooltip="Whole Word",
-            icon_size=18,
-            selected=False,
-            on_click=self._handle_toggle_whole_word,
-        )
+    if not query or count == 0:
+        match_label = "No results"
+    else:
+        match_label = f"{idx + 1} of {count}"
 
-        self._replace_field = ft.TextField(
-            hint_text="Replace",
-            dense=True,
-            width=200,
-            text_size=13,
-            content_padding=ft.Padding.symmetric(horizontal=8, vertical=4),
-            border_color=ft.Colors.GREY_800,
-            focused_border_color=ft.Colors.GREY_600,
-            border_width=0.5,
-        )
+    # --- Handlers ---
 
-        self._replace_toggle_btn = ft.IconButton(
-            icon=ft.Icons.EXPAND_MORE,
-            tooltip="Toggle Replace",
-            icon_size=SEARCH_ICON_SIZE,
-            on_click=self._handle_toggle_replace,
-        )
+    def _on_search_change(e) -> None:
+        navigated_ref.current = False
+        set_current_index(0)
+        set_query(e.control.value or "")
 
-        self._replace_row = ft.Row(
-            spacing=4,
-            visible=False,
-            controls=[
-                ft.Container(width=40),  # spacer to align with search field
-                self._replace_field,
-                ft.TextButton(
-                    "Replace",
-                    on_click=self._handle_replace_one,
-                    style=SEARCH_BUTTON_STYLE,
-                ),
-                ft.TextButton(
-                    "Replace All",
-                    on_click=self._handle_replace_all,
-                    style=SEARCH_BUTTON_STYLE,
-                ),
-            ],
-        )
-
-        search_row = ft.Row(
-            spacing=4,
-            controls=[
-                self._replace_toggle_btn,
-                self._search_field,
-                self._match_count_label,
-                self._case_btn,
-                self._whole_word_btn,
-                ft.IconButton(
-                    icon=ft.Icons.ARROW_UPWARD,
-                    tooltip="Previous Match",
-                    icon_size=SEARCH_ICON_SIZE,
-                    on_click=self._handle_prev,
-                ),
-                ft.IconButton(
-                    icon=ft.Icons.ARROW_DOWNWARD,
-                    tooltip="Next Match",
-                    icon_size=SEARCH_ICON_SIZE,
-                    on_click=self._handle_next,
-                ),
-                ft.IconButton(
-                    icon=ft.Icons.CLOSE,
-                    tooltip="Close (Escape)",
-                    icon_size=SEARCH_ICON_SIZE,
-                    on_click=lambda _: self.close(),
-                ),
-            ],
-        )
-
-        self._search_row = search_row
-        self.spacing = 2
-        self._is_open = False
-        # Start with no children — rows are added/removed by open()/close()
-        # to avoid Flet rendering issues with initially-invisible controls.
-        self.controls = []
-
-    # --- Public API ---
-
-    @property
-    def is_open(self) -> bool:
-        """Whether the search bar is currently open."""
-        return self._is_open
-
-    def open(self, *, with_replace: bool = False) -> None:
-        """Show the search bar, optionally with replace row."""
-        self._is_open = True
-        self._replace_visible = with_replace
-        self._replace_row.visible = with_replace
-        self._replace_toggle_btn.icon = (
-            ft.Icons.EXPAND_LESS if with_replace else ft.Icons.EXPAND_MORE
-        )
-        # Populate controls so Flet renders the rows
-        self.controls = [self._search_row, self._replace_row]
-        self.recompute()
-
-    async def focus_search(self) -> None:
-        """Focus the search text field."""
-        await self._search_field.focus()
-
-    def close(self) -> None:
-        """Hide the search bar and clear state."""
-        was_open = self._is_open
-        self._is_open = False
-        self._search_query = ""
-        self._search_field.value = ""
-        self._match_positions = []
-        self._current_match_index = -1
-        self._whole_word = False
-        self._whole_word_btn.selected = False
-        self._whole_word_btn.icon_color = None
-        self._match_count_label.value = "No results"
-        # Remove all children so Flet renders nothing
-        self.controls = []
-        if was_open and self._on_close:
-            self._on_close()
-
-    def recompute(self) -> None:
-        """Recompute matches against current editor content. Call when text changes."""
-        self._compute_matches()
-        self._update_match_display()
-        self._safe_update()
-
-    # --- Core logic ---
-
-    def _compute_matches(self) -> None:
-        """Find all occurrences of the search query in the editor text."""
-        self._match_positions = []
-        self._current_match_index = -1
-
-        if not self._search_query:
+    def _go(delta: int) -> None:
+        if not matches:
             return
-
-        text = self._get_text()
-        query = self._search_query
-
-        if self._whole_word:
-            pattern = r"\b" + re.escape(query) + r"\b"
-            flags = 0 if self._case_sensitive else re.IGNORECASE
-            for m in re.finditer(pattern, text, flags):
-                self._match_positions.append((m.start(), m.end()))
+        if navigated_ref.current:
+            set_current_index((idx + delta) % count)
         else:
-            if not self._case_sensitive:
-                text_search = text.lower()
-                query = query.lower()
-            else:
-                text_search = text
+            navigated_ref.current = True
+            set_current_index(idx)
+        if focus_editor:
+            focus_editor()
 
-            start = 0
-            while True:
-                idx = text_search.find(query, start)
-                if idx == -1:
-                    break
-                self._match_positions.append((idx, idx + len(self._search_query)))
-                start = idx + 1
-
-        if self._match_positions:
-            self._current_match_index = 0
-
-    def _update_match_display(self) -> None:
-        """Update the match count label and highlight current match."""
-        count = len(self._match_positions)
-        if not self._search_query or count == 0:
-            self._match_count_label.value = "No results"
-        else:
-            self._match_count_label.value = (
-                f"{self._current_match_index + 1} of {count}"
-            )
-            start, end = self._match_positions[self._current_match_index]
-            self._set_selection(start, end)
-
-    def _go_to_match(self, delta: int) -> None:
-        """Navigate to next (+1) or previous (-1) match with wrapping."""
-        if not self._match_positions:
+    def _on_replace_one(_e) -> None:
+        if not matches:
             return
-        self._current_match_index = (self._current_match_index + delta) % len(
-            self._match_positions
-        )
-        self._update_match_display()
-
-    # --- Event handlers ---
-
-    def _safe_update(self) -> None:
-        """Call self.update() only if the control is mounted on a page."""
-        with suppress(RuntimeError):
-            self.update()
-
-    def _handle_search_change(self, e) -> None:
-        self._search_query = e.control.value or ""
-        self._navigated = False
-        self.recompute()
-
-    def _handle_next(self, _e) -> None:
-        if self._navigated:
-            self._go_to_match(1)
-        else:
-            self._navigated = True
-            self._update_match_display()
-        if self._focus_editor:
-            self._focus_editor()
-        self._safe_update()
-
-    def _handle_prev(self, _e) -> None:
-        if self._navigated:
-            self._go_to_match(-1)
-        else:
-            self._navigated = True
-            self._update_match_display()
-        if self._focus_editor:
-            self._focus_editor()
-        self._safe_update()
-
-    def _handle_toggle_case(self, _e) -> None:
-        self._case_sensitive = not self._case_sensitive
-        self._case_btn.selected = self._case_sensitive
-        self._case_btn.icon_color = ft.Colors.BLUE if self._case_sensitive else None
-        self.recompute()
-
-    def _handle_toggle_whole_word(self, _e) -> None:
-        self._whole_word = not self._whole_word
-        self._whole_word_btn.selected = self._whole_word
-        self._whole_word_btn.icon_color = ft.Colors.BLUE if self._whole_word else None
-        self.recompute()
-
-    def _handle_toggle_replace(self, _e) -> None:
-        self._replace_visible = not self._replace_visible
-        self._replace_row.visible = self._replace_visible
-        self._replace_toggle_btn.icon = (
-            ft.Icons.EXPAND_LESS if self._replace_visible else ft.Icons.EXPAND_MORE
-        )
-        self._safe_update()
-
-    def _handle_replace_one(self, _e) -> None:
-        """Replace the current match and advance to next."""
-        if not self._match_positions or self._current_match_index < 0:
-            return
-
-        text = self._get_text()
-        start, end = self._match_positions[self._current_match_index]
-        replacement = self._replace_field.value or ""
+        start, end = matches[idx]
+        replacement = replace_ref.current or ""
         new_text = text[:start] + replacement + text[end:]
-        self._replace_text(new_text)
+        replace_text(new_text)
+        set_current_index(min(idx, max(0, count - 2)))
 
-        # Recompute and try to stay near the same position
-        old_index = self._current_match_index
-        self._compute_matches()
-        if self._match_positions:
-            self._current_match_index = min(old_index, len(self._match_positions) - 1)
-        self._update_match_display()
-        self._safe_update()
-
-    def _handle_replace_all(self, _e) -> None:
-        """Replace all matches at once."""
-        if not self._match_positions:
+    def _on_replace_all(_e) -> None:
+        if not matches:
             return
-
-        text = self._get_text()
-        replacement = self._replace_field.value or ""
-        query = self._search_query
-
-        if self._case_sensitive:
+        replacement = replace_ref.current or ""
+        if case_sensitive:
             new_text = text.replace(query, replacement)
         else:
             new_text = re.sub(
-                re.escape(query), lambda _: replacement, text, flags=re.IGNORECASE
+                re.escape(query), lambda _m: replacement, text, flags=re.IGNORECASE
             )
+        replace_text(new_text)
+        set_current_index(0)
 
-        self._replace_text(new_text)
-        self.recompute()
+    # --- Layout ---
+
+    search_row = ft.Row(
+        spacing=4,
+        controls=[
+            ft.IconButton(
+                icon=ft.Icons.EXPAND_LESS if replace_visible else ft.Icons.EXPAND_MORE,
+                tooltip="Toggle Replace",
+                icon_size=SEARCH_ICON_SIZE,
+                on_click=lambda _: set_replace_visible(not replace_visible),
+            ),
+            ft.TextField(
+                ref=search_field_ref.current,
+                value=query,
+                hint_text="Find",
+                dense=True,
+                width=200,
+                text_size=13,
+                content_padding=ft.Padding.symmetric(horizontal=8, vertical=4),
+                border_color=ft.Colors.GREY_800,
+                focused_border_color=ft.Colors.GREY_600,
+                on_change=_on_search_change,
+                on_submit=lambda _: _go(1),
+                border_width=0.5,
+            ),
+            ft.Text(match_label, size=12, color=ft.Colors.GREY_600),
+            ft.IconButton(
+                icon=ft.Icons.FORMAT_SIZE,
+                tooltip="Match Case",
+                icon_size=SEARCH_ICON_SIZE,
+                selected=case_sensitive,
+                icon_color=ft.Colors.BLUE if case_sensitive else None,
+                on_click=lambda _: set_case_sensitive(not case_sensitive),
+            ),
+            ft.IconButton(
+                icon=ft.Icons.ABC,
+                tooltip="Whole Word",
+                icon_size=18,
+                selected=whole_word,
+                icon_color=ft.Colors.BLUE if whole_word else None,
+                on_click=lambda _: set_whole_word(not whole_word),
+            ),
+            ft.IconButton(
+                icon=ft.Icons.ARROW_UPWARD,
+                tooltip="Previous Match",
+                icon_size=SEARCH_ICON_SIZE,
+                on_click=lambda _: _go(-1),
+            ),
+            ft.IconButton(
+                icon=ft.Icons.ARROW_DOWNWARD,
+                tooltip="Next Match",
+                icon_size=SEARCH_ICON_SIZE,
+                on_click=lambda _: _go(1),
+            ),
+            ft.IconButton(
+                icon=ft.Icons.CLOSE,
+                tooltip="Close (Escape)",
+                icon_size=SEARCH_ICON_SIZE,
+                on_click=lambda _: on_close() if on_close else None,
+            ),
+        ],
+    )
+
+    replace_row = ft.Row(
+        spacing=4,
+        visible=replace_visible,
+        controls=[
+            ft.Container(width=40),  # spacer to align with search field
+            ft.TextField(
+                value=replace_ref.current,
+                hint_text="Replace",
+                dense=True,
+                width=200,
+                text_size=13,
+                content_padding=ft.Padding.symmetric(horizontal=8, vertical=4),
+                border_color=ft.Colors.GREY_800,
+                focused_border_color=ft.Colors.GREY_600,
+                on_change=lambda e: setattr(replace_ref, "current", e.control.value),
+                border_width=0.5,
+            ),
+            ft.TextButton(
+                "Replace", on_click=_on_replace_one, style=SEARCH_BUTTON_STYLE
+            ),
+            ft.TextButton(
+                "Replace All", on_click=_on_replace_all, style=SEARCH_BUTTON_STYLE
+            ),
+        ],
+    )
+
+    return ft.Column(spacing=2, controls=[search_row, replace_row])

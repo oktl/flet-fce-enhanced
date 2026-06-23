@@ -1,9 +1,8 @@
-"""Toggleable unified diff pane for EnhancedCodeEditor."""
+"""Toggleable unified diff pane for EnhancedCodeEditor (declarative)."""
 
 from __future__ import annotations
 
 from collections.abc import Callable
-from contextlib import suppress
 import difflib
 
 import flet as ft
@@ -14,42 +13,52 @@ from fce_enhanced.themes import DEFAULT_THEME
 ICON_SIZE = 18
 
 
-class DiffPane(ft.Column):
-    """A toggleable pane showing a unified diff between saved and current content.
+@ft.component
+def DiffPane(
+    original_text: str,
+    current_text: str,
+    on_close: Callable[[], None] | None = None,
+    code_theme: fce.CustomCodeTheme | None = None,
+) -> ft.Control:
+    """A pane showing a unified diff between saved and current content.
 
-    Uses a read-only CodeEditor with ``language=DIFF`` for green/red syntax
-    coloring of additions and deletions.
+    Rendered only while the diff view is open (the parent controls visibility
+    via conditional rendering). Uses a read-only CodeEditor with
+    ``language=DIFF`` for green/red syntax coloring of additions/deletions.
 
     Args:
-        get_original_text: Callback returning the last-saved file content.
-        get_current_text: Callback returning the current editor content.
-        on_close: Callback invoked when the pane is dismissed (e.g. to update page layout).
-        code_theme: Initial code theme (should match the main editor).
+        original_text: The last-saved file content.
+        current_text: The current editor content.
+        on_close: Callback invoked when the close button is pressed.
+        code_theme: Code theme (should match the main editor).
     """
+    if code_theme is None:
+        code_theme = DEFAULT_THEME
 
-    def __init__(
-        self,
-        get_original_text: Callable[[], str],
-        get_current_text: Callable[[], str],
-        on_close: Callable[[], None] | None = None,
-        code_theme: fce.CustomCodeTheme | None = None,
-        **kwargs,
-    ):
-        super().__init__(**kwargs)
+    diff_text, added, removed = compute_unified_diff(original_text, current_text)
+    stats = "No changes" if added == 0 and removed == 0 else f"+{added} / -{removed}"
 
-        self._get_original_text = get_original_text
-        self._get_current_text = get_current_text
-        self._on_close = on_close
+    header_row = ft.Row(
+        spacing=8,
+        controls=[
+            ft.Icon(ft.Icons.DIFFERENCE, size=ICON_SIZE, color=ft.Colors.GREY_600),
+            ft.Text("Diff", size=12, weight=ft.FontWeight.BOLD),
+            ft.Text(stats, size=11, color=ft.Colors.GREY_600),
+            ft.Container(expand=True),
+            ft.IconButton(
+                icon=ft.Icons.CLOSE,
+                icon_size=ICON_SIZE,
+                tooltip="Close Diff",
+                on_click=lambda _: on_close() if on_close else None,
+            ),
+        ],
+    )
 
-        if code_theme is None:
-            code_theme = DEFAULT_THEME
-
-        self._stats_label = ft.Text("No changes", size=11, color=ft.Colors.GREY_600)
-
-        self._diff_editor = fce.CodeEditor(
+    diff_container = ft.Container(
+        content=fce.CodeEditor(
             language=fce.CodeLanguage.DIFF,
             code_theme=code_theme,
-            value="",
+            value=diff_text,
             read_only=True,
             text_style=ft.TextStyle(font_family="monospace", height=1.2, size=12),
             gutter_style=fce.GutterStyle(
@@ -59,89 +68,20 @@ class DiffPane(ft.Column):
                 width=60,
             ),
             expand=True,
-        )
+        ),
+        height=200,
+        border=ft.Border.all(1, ft.Colors.GREY_800),
+        border_radius=4,
+    )
 
-        self._diff_container = ft.Container(
-            content=self._diff_editor,
-            height=200,
-            border=ft.Border.all(1, ft.Colors.GREY_800),
-            border_radius=4,
-        )
-
-        self._header_row = ft.Row(
-            spacing=8,
-            controls=[
-                ft.Icon(ft.Icons.DIFFERENCE, size=ICON_SIZE, color=ft.Colors.GREY_600),
-                ft.Text("Diff", size=12, weight=ft.FontWeight.BOLD),
-                self._stats_label,
-                ft.Container(expand=True),
-                ft.IconButton(
-                    icon=ft.Icons.CLOSE,
-                    icon_size=ICON_SIZE,
-                    tooltip="Close Diff",
-                    on_click=lambda _: self.close(),
-                ),
-            ],
-        )
-
-        self.spacing = 2
-        self._is_open = False
-        self.controls = []
-
-    # --- Public API ---
-
-    @property
-    def is_open(self) -> bool:
-        """Whether the diff pane is currently visible."""
-        return self._is_open
-
-    @property
-    def code_theme(self) -> fce.CustomCodeTheme:
-        """The current code theme of the diff editor."""
-        return self._diff_editor.code_theme
-
-    @code_theme.setter
-    def code_theme(self, theme: fce.CustomCodeTheme) -> None:
-        self._diff_editor.code_theme = theme
-
-    def open(self) -> None:
-        """Show the diff pane and compute the current diff."""
-        self._is_open = True
-        self.controls = [
-            self._header_row,
+    return ft.Column(
+        spacing=2,
+        controls=[
+            header_row,
             ft.Divider(height=1, color=ft.Colors.GREY_800),
-            self._diff_container,
-        ]
-        self.recompute()
-
-    def close(self) -> None:
-        """Hide the diff pane and clear content."""
-        was_open = self._is_open
-        self._is_open = False
-        self._diff_editor.value = ""
-        self._stats_label.value = "No changes"
-        self.controls = []
-        if was_open and self._on_close:
-            self._on_close()
-
-    def recompute(self) -> None:
-        """Recompute the unified diff and update the display."""
-        original = self._get_original_text()
-        current = self._get_current_text()
-
-        diff_text, added, removed = compute_unified_diff(original, current)
-
-        self._diff_editor.value = diff_text
-        if added == 0 and removed == 0:
-            self._stats_label.value = "No changes"
-        else:
-            self._stats_label.value = f"+{added} / -{removed}"
-        self._safe_update()
-
-    def _safe_update(self) -> None:
-        """Call self.update() only if mounted."""
-        with suppress(RuntimeError):
-            self.update()
+            diff_container,
+        ],
+    )
 
 
 def compute_unified_diff(original: str, current: str) -> tuple[str, int, int]:
