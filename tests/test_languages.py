@@ -27,6 +27,6 @@ def test_language_for_path_case_insensitive():
 
 def test_extension_map_values_are_valid():
     for ext, lang in EXTENSION_TO_LANGUAGE.items():
-        assert isinstance(
-            lang, fce.CodeLanguage
-        ), f"Extension {ext!r} maps to {lang!r} which is not a CodeLanguage member"
+        assert isinstance(lang, fce.CodeLanguage), (
+            f"Extension {ext!r} maps to {lang!r} which is not a CodeLanguage member"
+        )

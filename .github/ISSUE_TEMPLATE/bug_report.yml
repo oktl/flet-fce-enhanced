@@ -1,0 +1,81 @@
+name: Bug Report
+description: Something isn't working as expected
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug! The more detail you can provide, the easier it is to track down.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: A clear description of what the bug is.
+      placeholder: "e.g. The function returns None instead of the expected list."
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect to happen?
+      placeholder: "e.g. I expected the function to return a sorted list of strings."
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to Reproduce
+      description: How can I reproduce the issue?
+      placeholder: |
+        1. Run ...
+        2. Call function with ...
+        3. See error
+    validations:
+      required: true
+
+  - type: textarea
+    id: code
+    attributes:
+      label: Relevant Code
+      description: Paste any relevant Python code here.
+      render: python
+      placeholder: |
+        def my_function():
+            # paste your code here
+            pass
+    validations:
+      required: false
+
+  - type: textarea
+    id: error
+    attributes:
+      label: Error Message or Traceback
+      description: If you're seeing an error, paste the full traceback here.
+      render: shell
+      placeholder: |
+        Traceback (most recent call last):
+          ...
+        TypeError: ...
+    validations:
+      required: false
+
+  - type: input
+    id: python-version
+    attributes:
+      label: Python Version
+      description: What version of Python are you using? (Run `python --version` to check.)
+      placeholder: "e.g. 3.12.2"
+    validations:
+      required: false
+
+  - type: input
+    id: os
+    attributes:
+      label: Operating System
+      placeholder: "e.g. Windows 11, macOS 14, Ubuntu 22.04"
+    validations:
+      required: false

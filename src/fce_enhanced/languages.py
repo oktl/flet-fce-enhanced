@@ -57,6 +57,21 @@ EXTENSION_TO_LANGUAGE: dict[str, fce.CodeLanguage] = {
 }
 
 
+# Reverse map: first extension found for each language (prefer shorter/canonical ones).
+LANGUAGE_TO_EXTENSION: dict[fce.CodeLanguage, str] = {}
+for _ext, _lang in EXTENSION_TO_LANGUAGE.items():
+    if _lang not in LANGUAGE_TO_EXTENSION:
+        LANGUAGE_TO_EXTENSION[_lang] = _ext
+
+
+def extension_for_language(lang: fce.CodeLanguage) -> str:
+    """Return the canonical file extension for a CodeLanguage (e.g. '.py', '.json').
+
+    Returns '.txt' if no mapping exists.
+    """
+    return LANGUAGE_TO_EXTENSION.get(lang, ".txt")
+
+
 def language_for_path(path: str | None) -> fce.CodeLanguage:
     """Detect CodeLanguage from a file path's extension.
 

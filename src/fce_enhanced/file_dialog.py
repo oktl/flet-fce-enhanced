@@ -119,10 +119,9 @@ async def open_file(prompt: str = "Open File") -> str | None:
 
     import flet as ft
 
-    picker = ft.FilePicker()
-    result = await picker.pick_files_async(dialog_title=prompt)
-    if result and result.files:
-        return result.files[0].path
+    files = await ft.FilePicker().pick_files(dialog_title=prompt)
+    if files:
+        return files[0].path
     return None
 
 
@@ -146,6 +145,4 @@ async def save_file(
 
     import flet as ft
 
-    picker = ft.FilePicker()
-    result = await picker.save_file_async(dialog_title=prompt, file_name=default_name)
-    return result
+    return await ft.FilePicker().save_file(dialog_title=prompt, file_name=default_name)

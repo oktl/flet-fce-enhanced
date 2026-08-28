@@ -1,0 +1,60 @@
+title: "[Question] "
+labels: ["question"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for your question! To help me give you the best answer, please fill out the sections below.
+
+  - type: textarea
+    id: question
+    attributes:
+      label: Your Question
+      description: What would you like to know? Be as specific as you can.
+      placeholder: "e.g. Why does my function return None instead of the list I expected?"
+    validations:
+      required: true
+
+  - type: textarea
+    id: code
+    attributes:
+      label: Your Code
+      description: Please paste the relevant Python code below. This is the most important thing I need to help you!
+      render: python
+      placeholder: |
+        def my_function():
+            # paste your code here
+            pass
+    validations:
+      required: true
+
+  - type: textarea
+    id: error
+    attributes:
+      label: Error Message or Unexpected Output
+      description: If you're seeing an error, paste the full traceback here. If the output is just wrong, describe what you expected vs. what you got.
+      render: shell
+      placeholder: |
+        Traceback (most recent call last):
+          ...
+        TypeError: ...
+    validations:
+      required: false
+
+  - type: textarea
+    id: tried
+    attributes:
+      label: What Have You Already Tried?
+      description: Share anything you've already attempted — it helps avoid suggestions you've already ruled out.
+      placeholder: "e.g. I tried changing X to Y but got the same result."
+    validations:
+      required: false
+
+  - type: input
+    id: python-version
+    attributes:
+      label: Python Version
+      description: What version of Python are you using? (Run `python --version` to check.)
+      placeholder: "e.g. 3.12.2"
+    validations:
+      required: false

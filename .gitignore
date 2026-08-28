@@ -9,9 +9,20 @@ wheels/
 # Virtual environments
 .venv
 
+# Testing / coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Linting
+.ruff_cache/
+
 # IDE files
 .vscode/
 .idea/
+
+# Claude Code
+.claude/
 
 # Flet Code Editor Enhanced specific
 *.fcebackup

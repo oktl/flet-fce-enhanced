@@ -1,4 +1,4 @@
-"""Theme selection helpers for the code editor."""
+"""Code Theme selection helpers for the code editor."""
 
 import flet_code_editor as fce
 

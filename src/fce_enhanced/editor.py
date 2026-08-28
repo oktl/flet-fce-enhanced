@@ -1,19 +1,48 @@
-"""Enhanced CodeEditor with file open/save/save-as/close capabilities.
+"""Enhanced CodeEditor with file I/O, search/replace, and syntax highlighting.
 
-Based on CodeEditor control from Flet docs
-https://docs.flet.dev/codeeditor/ with added file I/O toolbar.
+Built on the CodeEditor control from Flet docs
+https://docs.flet.dev/codeeditor/ with a full-featured toolbar including
+file operations, find/replace, go-to-line, font sizing, read-only toggle,
+ruff on-save toggle, diff view on toggle, language and theme selectors,
+command palette, and help.
+
+This module uses Flet's declarative API (``@ft.component`` + ``use_state``).
+The editor is a component function; external callers drive it through an
+:class:`EditorHandle` passed as the ``handle`` prop (e.g. ``handle.open_path``).
+
+UI dialogs (theme/language pickers, go-to-line, command palette,
+confirm-discard, and help) are defined in ``dialogs.py``. A toggleable unified
+diff view is provided by ``DiffPane`` from ``diff_pane.py``.
 """
 
+from __future__ import annotations
+
 import asyncio
-import shutil
+from contextlib import suppress
+from dataclasses import dataclass, field
 from pathlib import Path
+import platform
+import shutil
+import sys
+from typing import Any
 
 import flet as ft
 import flet_code_editor as fce
 from loguru import logger
 
+from fce_enhanced.dialogs import (
+    confirm_discard,
+    confirm_revert,
+    goto_line_dialog,
+    open_command_palette,
+    show_help_dialog,
+    show_language_dialog,
+    show_theme_dialog,
+)
+from fce_enhanced.diff_pane import DiffPane
 from fce_enhanced.file_dialog import open_file, save_file
-from fce_enhanced.languages import language_for_path
+from fce_enhanced.help_content import HELP_TEXT
+from fce_enhanced.languages import extension_for_language, language_for_path
 from fce_enhanced.search import SearchReplaceBar
 from fce_enhanced.themes import DEFAULT_THEME, THEMES
 
@@ -21,7 +50,6 @@ DEFAULT_CODE = """\
 # New file
 """
 
-BUTTON_STYLE = ft.ButtonStyle(text_style=ft.TextStyle(size=12))
 APPBAR_HEIGHT = 18
 ICON_SIZE = 16
 DEFAULT_FONT_SIZE = 13
@@ -102,11 +130,6 @@ class EnhancedCodeEditor(ft.Column):
                 width=80,
             )
 
-        # --- UI elements ---
-        self._title_bar = ft.Text("untitled", size=12, color=ft.Colors.GREY_600)
-        self._status_bar = ft.Text(
-            "Ln 1, Col 1 | Python", size=12, color=ft.Colors.GREY_600
-        )
 
         self._save_btn = ft.IconButton(
             ft.Icons.SAVE,
@@ -125,30 +148,12 @@ class EnhancedCodeEditor(ft.Column):
             on_click=lambda _e: self._toggle_read_only(),
         )
 
-        self._code_editor = fce.CodeEditor(
-            language=language,
-            code_theme=code_theme,
-            autocomplete=autocomplete,
-            autocomplete_words=autocomplete_words or [],
-            value=value,
-            text_style=text_style,
-            gutter_style=gutter_style,
-            on_selection_change=self._handle_selection_change,
-            on_change=self._handle_change,
-            expand=True,
-        )
 
-        # --- Search bar ---
-        self._search_bar = SearchReplaceBar(
-            get_text=lambda: self._code_editor.value or "",
-            set_selection=self._set_editor_selection,
-            replace_text=self._apply_replace_text,
-            focus_editor=self._focus_editor,
-            on_close=self._on_search_closed,
-        )
+def _offset_to_line_col(text: str, offset: int) -> tuple[int, int]:
+    before = text[: max(0, offset)]
+    lines = before.split("\n")
+    return len(lines), len(lines[-1]) + 1
 
-        # --- Build layout ---
-        controls = []
 
         appbar = ft.Row(
             controls=[
@@ -223,194 +228,223 @@ class EnhancedCodeEditor(ft.Column):
         )
         controls.append(self._code_editor)
 
-        if show_status_bar:
-            controls.append(ft.Row(controls=[self._status_bar]))
+@dataclass
+class EditorHandle:
+    """Imperative handle to a mounted :func:`EnhancedCodeEditor` component.
 
-        self.spacing = 10
-        self.controls = controls
+    Populated on every render so external callers can drive the editor without
+    a control instance. Coroutine methods (``open_path``, ``save``,
+    ``save_as``, ``close``) are scheduled with ``page.run_task``. Read-only
+    accessors (``value``, ``dirty``, ``current_path``) reflect live state.
+    """
 
-    # --- Properties ---
-
-    @property
-    def current_path(self) -> str | None:
-        """The path of the currently open file, or None for untitled."""
-        return self._current_path
-
-    @property
-    def dirty(self) -> bool:
-        """Whether the editor has unsaved changes."""
-        return self._dirty
-
-    @property
-    def code_editor(self) -> fce.CodeEditor:
-        """The underlying CodeEditor control."""
-        return self._code_editor
+    open_path: Any = None
+    save: Any = None
+    save_as: Any = None
+    close: Any = None
+    _get_value: Any = None
+    _get_dirty: Any = None
+    _get_path: Any = None
 
     @property
     def value(self) -> str:
-        """The current editor content."""
-        return self._code_editor.value or ""
-
-    @value.setter
-    def value(self, content: str):
-        self._code_editor.value = content
+        return self._get_value() if self._get_value else ""
 
     @property
-    def language(self) -> fce.CodeLanguage:
-        """The current syntax highlighting language."""
-        return self._code_editor.language
+    def dirty(self) -> bool:
+        return self._get_dirty() if self._get_dirty else False
 
-    @language.setter
-    def language(self, lang: fce.CodeLanguage):
-        self._code_editor.language = lang
+    @property
+    def current_path(self) -> str | None:
+        return self._get_path() if self._get_path else None
 
-    # --- Lifecycle ---
 
-    def did_mount(self):
-        if self._register_keyboard_shortcuts:
-            self.page.on_keyboard_event = self._handle_keyboard
+@dataclass
+class _Refs:
+    """Mutable, render-stable state that should not trigger re-renders.
 
-    def will_unmount(self):
-        if self._register_keyboard_shortcuts and self.page:
-            self.page.on_keyboard_event = None
+    ``text`` is the authoritative current content, kept in sync by the editor's
+    ``on_change``. ``last_saved`` is the content as of the last save/load, used
+    for dirty tracking and the diff pane.
+    """
 
-    # --- Title / dirty state ---
+    text: str = ""
+    last_saved: str = ""
+    snackbar: ft.SnackBar | None = None
+    editor: ft.Ref = field(default_factory=ft.Ref)
+    keyboard: Any = None
 
-    def _update_title(self):
-        if self._current_path:
-            try:
-                display = "~/" + str(Path(self._current_path).relative_to(Path.home()))
-            except ValueError:
-                display = self._current_path
-            name = Path(self._current_path).name
+
+@ft.component
+def EnhancedCodeEditor(
+    language: fce.CodeLanguage = fce.CodeLanguage.PLAINTEXT,
+    value: str = DEFAULT_CODE,
+    show_toolbar: bool = True,
+    show_status_bar: bool = True,
+    show_gutter: bool = True,
+    register_keyboard_shortcuts: bool = True,
+    autocomplete: bool = True,
+    autocomplete_words: list[str] | None = None,
+    code_theme: fce.CustomCodeTheme | None = None,
+    text_style: ft.TextStyle | None = None,
+    gutter_style: fce.GutterStyle | None = None,
+    on_title_change=None,
+    ruff_on_save: bool = False,
+    initial_path: str | None = None,
+    handle: EditorHandle | None = None,
+    expand: bool = False,
+) -> ft.Control:
+    """A reusable Flet CodeEditor with a full-featured toolbar.
+
+    Toolbar: Open, Save, Save As, Close, Revert, Find, Go to Line, Font Size
+    +/-, Diff, Read-Only toggle, Ruff On/Off toggle, Gutter toggle, Language
+    selector, Theme selector, and Help.
+
+    Keyboard shortcuts (Cmd/Ctrl unless noted):
+        O/S/Shift+S/W — file ops | F — find | Option+F / Ctrl+H — replace |
+        G — go to line | L — read-only | Shift+L — language | Shift+G — gutter |
+        Shift+R — revert | +/- — font size | Shift+P — palette | F1 — help |
+        Esc — close search | D — diff
+
+    Args:
+        language: Initial code language for syntax highlighting.
+        value: Initial editor content.
+        show_toolbar: Whether to show the file I/O toolbar.
+        show_status_bar: Whether to show the line/column status bar.
+        show_gutter: Whether to initially show the line-number gutter.
+        register_keyboard_shortcuts: Whether to register global keyboard shortcuts.
+        autocomplete: Whether to enable autocomplete.
+        autocomplete_words: Words for autocomplete suggestions.
+        code_theme: Custom code theme for syntax highlighting.
+        text_style: Text style for the editor content.
+        gutter_style: Style for the line number gutter.
+        on_title_change: Callback ``(display_path, name, is_dirty)`` fired when
+            the file title or dirty state changes.
+        ruff_on_save: Run ruff check --fix and ruff format on Python files after
+            saving. Requires ruff installed. Defaults to False.
+        initial_path: File to open automatically on mount (e.g. from argv).
+        handle: Optional :class:`EditorHandle` populated with imperative methods.
+        expand: Whether the root column should expand to fill its parent.
+    """
+    if code_theme is None:
+        code_theme = DEFAULT_THEME
+    base_theme: fce.CodeTheme | None = (
+        code_theme if isinstance(code_theme, fce.CodeTheme) else None
+    )
+
+    default_text_style = text_style or ft.TextStyle(
+        font_family="monospace", height=1.2, size=DEFAULT_FONT_SIZE
+    )
+    visible_gutter = gutter_style or fce.GutterStyle(
+        text_style=ft.TextStyle(font_family="monospace", height=1.2),
+        show_line_numbers=True,
+        show_folding_handles=True,
+        width=80,
+    )
+    hidden_gutter = fce.GutterStyle(
+        show_line_numbers=False,
+        show_folding_handles=False,
+        show_errors=False,
+        width=0,
+        margin=0,
+    )
+
+    # --- State (drives re-render) ---
+    current_path, set_current_path = ft.use_state(None)
+    dirty, set_dirty = ft.use_state(False)
+    gutter_on, set_gutter_on = ft.use_state(show_gutter)
+    ruff_on, set_ruff_on = ft.use_state(ruff_on_save)
+    read_only, set_read_only = ft.use_state(False)
+    font_size, set_font_size = ft.use_state(
+        int(default_text_style.size or DEFAULT_FONT_SIZE)
+    )
+    lang, set_lang = ft.use_state(language)
+    theme, set_theme = ft.use_state(base_theme)
+    search_open, set_search_open = ft.use_state(False)
+    search_with_replace, set_search_with_replace = ft.use_state(False)
+    diff_open, set_diff_open = ft.use_state(False)
+    editor_value, set_editor_value = ft.use_state(value)
+    text_version, set_text_version = ft.use_state(0)
+    status, set_status = ft.use_state((1, 1, 0))
+    selection, set_selection = ft.use_state(
+        ft.TextSelection(base_offset=0, extent_offset=0)
+    )
+
+    # --- Refs (mutable, no re-render) ---
+    refs = ft.use_ref(lambda: _Refs(text=value, last_saved=value))
+    r: _Refs = refs.current
+    page = ft.context.page
+
+    # --- Editor-control helpers ---
+
+    def _load_content(content: str, *, mark_clean: bool = False) -> None:
+        """Set editor content programmatically (controlled ``value`` prop).
+
+        ``editor_value`` state is the editor's ``value`` prop; changing it
+        re-renders and patches the new content onto the live control. Cursor is
+        reset to the top via ``selection``.
+        """
+        r.text = content
+        if mark_clean:
+            r.last_saved = content
+            set_dirty(False)
         else:
-            display = "untitled"
-            name = "untitled"
+            set_dirty(content != r.last_saved)
+        set_editor_value(content)
+        set_selection(ft.TextSelection(base_offset=0, extent_offset=0))
+        set_text_version(text_version + 1)
 
-        self._title_bar.value = display
-        self._title_bar.color = ft.Colors.AMBER_600 if self._dirty else None
+    async def _focus_editor() -> None:
+        # Best-effort: focus() is a method invoke (no prop mutation), so it is
+        # safe even on a frozen render snapshot as long as it is mounted.
+        ctrl = r.editor.current
+        if ctrl is not None:
+            with suppress(Exception):
+                await ctrl.focus()
 
-        if self.on_title_change:
-            self.on_title_change(display, name, self._dirty)
+    def _focus_editor_sync() -> None:
+        page.run_task(_focus_editor)
 
-        self.update()
+    def _set_editor_selection(base: int, extent: int) -> None:
+        set_selection(ft.TextSelection(base_offset=base, extent_offset=extent))
 
-    def _mark_dirty(self):
-        if not self._dirty:
-            self._dirty = True
-            self._save_btn.disabled = False
-            self._update_title()
+    def _apply_replace_text(new_text: str) -> None:
+        _load_content(new_text)
 
-    def _mark_clean(self, content: str):
-        self._dirty = False
-        self._last_saved_content = content
-        self._save_btn.disabled = True
-        self._update_title()
+    # --- Snackbar ---
 
-    # --- Unsaved-changes confirmation dialog ---
+    def _dismiss_snackbar() -> None:
+        if r.snackbar is not None and r.snackbar.open:
+            page.pop_dialog()
 
-    async def _confirm_discard(self) -> str:
-        """Show a Save/Discard/Cancel dialog. Returns chosen action string."""
-        choice: list[str | None] = [None]
-
-        def _on_choice(action: str):
-            def handler(_e):
-                choice[0] = action
-                dlg.open = False
-                self.page.update()
-
-            return handler
-
-        dlg = ft.AlertDialog(
-            modal=True,
-            title=ft.Text("Unsaved Changes"),
-            content=ft.Text("You have unsaved changes. What would you like to do?"),
-            actions=[
-                ft.TextButton("Save", on_click=_on_choice("save")),
-                ft.TextButton("Discard", on_click=_on_choice("discard")),
-                ft.TextButton("Cancel", on_click=_on_choice("cancel")),
-            ],
-            actions_alignment=ft.MainAxisAlignment.END,
-        )
-        self.page.overlay.append(dlg)
-        dlg.open = True
-        self.page.update()
-
-        while choice[0] is None:
-            await asyncio.sleep(0.05)
-
-        self.page.overlay.remove(dlg)
-        self.page.update()
-        return choice[0]
-
-    # --- File operations ---
-
-    async def _handle_open(self, _e):
-        if self._dirty:
-            action = await self._confirm_discard()
-            if action == "save":
-                await self._do_save()
-                if self._dirty:
-                    return
-            elif action == "cancel":
-                return
-
-        path = await open_file("Open File")
-        if path is None:
-            return
-
-        try:
-            content = Path(path).read_text(encoding="utf-8")
-        except (UnicodeDecodeError, ValueError):
-            err = ft.SnackBar(ft.Text("Cannot open: file is not valid UTF-8 text"))
-            self.page.overlay.append(err)
-            err.open = True
-            self.page.update()
-            return
-
-        self._current_path = path
-        self._last_saved_content = content
-        self._code_editor.value = content
-        self._code_editor.language = language_for_path(path)
-        self._mark_clean(content)
-        await self._code_editor.focus()
-        await asyncio.sleep(0.05)
-        self._code_editor.selection = ft.TextSelection(base_offset=0, extent_offset=0)
-        try:
-            self._code_editor.update()
-        except RuntimeError:
-            pass
-
-    def _show_snackbar(self, message: str, *, is_error: bool = False) -> None:
-        """Show a message to the user via a SnackBar with a dismiss button."""
+    def _show_snackbar(message: str, *, is_error: bool = False) -> None:
+        if r.snackbar is not None and r.snackbar.open:
+            page.pop_dialog()
         snack = ft.SnackBar(
             ft.Text(message, color=ft.Colors.WHITE, selectable=True),
             bgcolor=ft.Colors.RED_800 if is_error else ft.Colors.GREY_800,
             action="Dismiss",
             duration=86400000,  # effectively permanent until dismissed
         )
-        self.page.overlay.append(snack)
-        snack.open = True
-        self.page.update()
+        r.snackbar = snack
+        page.show_dialog(snack)
 
-    async def _run_ruff(self, path: str) -> None:
-        """Run ruff check --fix and ruff format on a saved Python file.
+    # --- Dirty / clean ---
 
-        Silently skips if ruff is not installed or the file is not Python.
-        Updates the editor content with the formatted result.
-        Shows remaining warnings to the user via a snackbar.
-        """
-        if not self._ruff_on_save:
-            return
-        if not path.endswith(".py"):
+    def _mark_clean(content: str) -> None:
+        r.last_saved = content
+        set_dirty(False)
+
+    # --- Ruff on save ---
+
+    async def _run_ruff(path: str) -> None:
+        if not ruff_on or not path.endswith(".py"):
             return
         ruff = shutil.which("ruff")
         if ruff is None:
             logger.debug("ruff not found on PATH, skipping post-save formatting")
             return
 
-        # ruff check --fix applies auto-fixes but exits non-zero if
-        # unfixable violations remain — that's normal, so don't bail out.
         check_proc = await asyncio.create_subprocess_exec(
             ruff,
             "check",
@@ -420,18 +454,14 @@ class EnhancedCodeEditor(ft.Column):
             stderr=asyncio.subprocess.PIPE,
         )
         check_stdout, _ = await check_proc.communicate()
-
-        # Show remaining lint warnings to the user
         check_output = check_stdout.decode().strip()
         if check_proc.returncode != 0 and check_output:
-            # Strip the "Found N errors" summary, keep the actual violations
             lines = [
                 ln for ln in check_output.splitlines() if not ln.startswith("Found ")
             ]
             if lines:
-                self._show_snackbar(f"Ruff: {'; '.join(lines)}", is_error=True)
+                _show_snackbar(f"Ruff: {'; '.join(lines)}", is_error=True)
 
-        # Run formatter
         fmt_proc = await asyncio.create_subprocess_exec(
             ruff,
             "format",
@@ -443,138 +473,119 @@ class EnhancedCodeEditor(ft.Column):
         if fmt_proc.returncode != 0:
             msg = fmt_stderr.decode().strip()
             logger.warning("ruff format failed: {}", msg)
-            self._show_snackbar(f"Ruff format failed: {msg}", is_error=True)
+            _show_snackbar(f"Ruff format failed: {msg}", is_error=True)
             return
 
-        # Reload formatted content into editor
-        formatted = Path(path).read_text(encoding="utf-8")
-        if formatted != self._code_editor.value:
-            self._code_editor.value = formatted
-            self._last_saved_content = formatted
-            self.update()
+        try:
+            formatted = Path(path).read_text(encoding="utf-8")
+        except OSError as exc:
+            logger.warning("Failed to reload after ruff: {}", exc)
+            return
+        if formatted != r.text:
+            _load_content(formatted, mark_clean=True)
 
-    async def _do_save(self) -> bool:
-        """Save to current_path. Returns True if saved, False if cancelled."""
-        if self._current_path is None:
-            return await self._do_save_as()
+    # --- File operations ---
 
-        content = self._code_editor.value or ""
-        Path(self._current_path).write_text(content, encoding="utf-8")
-        self._mark_clean(content)
-        await self._run_ruff(self._current_path)
-        return True
+    async def open_path(path: str) -> None:
+        try:
+            content = Path(path).read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError, ValueError) as exc:
+            _show_snackbar(f"Cannot open file: {exc}", is_error=True)
+            return
+        set_diff_open(False)
+        set_lang(language_for_path(path))
+        set_current_path(path)
+        set_ruff_on(path.endswith(".py"))
+        _load_content(content, mark_clean=True)
 
-    async def _do_save_as(self) -> bool:
-        """Save As dialog. Returns True if saved, False if cancelled."""
-        default = (
-            Path(self._current_path).name if self._current_path else "untitled.txt"
-        )
-        path = await save_file("Save File", default)
-        if path is None:
-            return False
-
-        self._current_path = path
-        content = self._code_editor.value or ""
-        Path(path).write_text(content, encoding="utf-8")
-        self._code_editor.language = language_for_path(path)
-        self._mark_clean(content)
-        await self._run_ruff(path)
-        return True
-
-    async def _handle_save(self, _e):
-        await self._do_save()
-
-    async def _handle_save_as(self, _e):
-        await self._do_save_as()
-
-    async def _handle_close(self, _e):
-        if self._dirty:
-            action = await self._confirm_discard()
+    async def _handle_open(_e=None) -> None:
+        if dirty:
+            action = await confirm_discard(page)
             if action == "save":
-                saved = await self._do_save()
-                if not saved:
+                if not await _do_save():
                     return
             elif action == "cancel":
                 return
+        path = await open_file("Open File")
+        if path is None:
+            return
+        await open_path(path)
 
-        self._current_path = None
-        self._dirty = False
-        self._last_saved_content = DEFAULT_CODE
-        self._save_btn.disabled = True
-        self._code_editor.language = fce.CodeLanguage.PYTHON
-        self._update_title()
-        await asyncio.sleep(0.05)
-        self._code_editor.value = DEFAULT_CODE
-        self.update()
-        await self._code_editor.focus()
+    async def _do_save() -> bool:
+        if current_path is None:
+            return await _do_save_as()
+        content = r.text
+        try:
+            Path(current_path).write_text(content, encoding="utf-8")
+        except OSError as exc:
+            logger.error("Failed to save {}: {}", current_path, exc)
+            _show_snackbar(f"Save failed: {exc}", is_error=True)
+            return False
+        _dismiss_snackbar()
+        _mark_clean(content)
+        await _run_ruff(current_path)
+        return True
 
-    # --- Theme selection ---
+    async def _do_save_as() -> bool:
+        if current_path:
+            default = Path(current_path).name
+        else:
+            default = f"untitled{extension_for_language(lang)}"
+        path = await save_file("Save File", default)
+        if path is None:
+            return False
+        content = r.text
+        try:
+            Path(path).write_text(content, encoding="utf-8")
+        except OSError as exc:
+            logger.error("Failed to save {}: {}", path, exc)
+            _show_snackbar(f"Save failed: {exc}", is_error=True)
+            return False
+        _dismiss_snackbar()
+        set_current_path(path)
+        set_lang(language_for_path(path))
+        set_ruff_on(path.endswith(".py"))
+        _mark_clean(content)
+        await _run_ruff(path)
+        return True
 
-    def _handle_theme_click(self, _e):
-        self._show_theme_dialog()
+    async def _do_close(_e=None) -> None:
+        if dirty:
+            action = await confirm_discard(page)
+            if action == "save":
+                if not await _do_save():
+                    return
+            elif action == "cancel":
+                return
+        set_diff_open(False)
+        set_current_path(None)
+        set_ruff_on(False)
+        set_lang(fce.CodeLanguage.PYTHON)
+        _load_content(DEFAULT_CODE, mark_clean=True)
 
-    def _show_theme_dialog(self):
-        theme_list = ft.ListView(
-            height=300,
-            controls=self._build_theme_tiles(THEMES),
-        )
+    async def _handle_revert(_e=None) -> None:
+        if not dirty:
+            return
+        if not await confirm_revert(page):
+            return
+        set_diff_open(False)
+        _load_content(r.last_saved, mark_clean=True)
 
-        def close(_e):
-            self._theme_dlg.open = False
-            self.page.update()
+    # --- Theme / language ---
 
-        self._theme_dlg = ft.AlertDialog(
-            title=ft.Text("Choose Theme"),
-            content=ft.Column(
-                [
-                    ft.TextField(
-                        hint_text="Search themes...",
-                        prefix_icon=ft.Icons.SEARCH,
-                        on_change=lambda e: self._filter_theme_list(
-                            e.control.value, theme_list
-                        ),
-                        autofocus=True,
-                    ),
-                    theme_list,
-                ],
-                tight=True,
-                width=350,
-            ),
-            actions=[ft.TextButton("Close", on_click=close)],
-            actions_alignment=ft.MainAxisAlignment.END,
-            on_dismiss=close,
-        )
+    def _handle_theme_click(_e=None) -> None:
+        show_theme_dialog(page, THEMES, theme, _select_theme)
 
-        self.page.overlay.append(self._theme_dlg)
-        self._theme_dlg.open = True
-        self.page.update()
+    def _select_theme(selected: fce.CodeTheme) -> None:
+        set_theme(selected)
+        page.pop_dialog()
 
-    def _build_theme_tiles(self, themes: dict[str, fce.CodeTheme]) -> list[ft.ListTile]:
-        tiles = []
-        for display_name, theme_val in themes.items():
-            is_current = theme_val == self._current_theme
-            tiles.append(
-                ft.ListTile(
-                    leading=ft.Icon(ft.Icons.CHECK, visible=is_current),
-                    title=ft.Text(display_name, size=14),
-                    on_click=lambda _e, t=theme_val: self._select_theme(t),
-                )
-            )
-        return tiles
+    def _handle_language_click(_e=None) -> None:
+        show_language_dialog(page, lang, _select_language)
 
-    def _filter_theme_list(self, query: str, theme_list: ft.ListView):
-        q = (query or "").lower()
-        filtered = {k: v for k, v in THEMES.items() if q in k.lower()}
-        theme_list.controls = self._build_theme_tiles(filtered)
-        self.page.update()
-
-    def _select_theme(self, theme: fce.CodeTheme):
-        self._current_theme = theme
-        self._code_editor.code_theme = theme
-        if hasattr(self, "_theme_dlg") and self._theme_dlg is not None:
-            self._theme_dlg.open = False
-        self.page.update()
-        self.update()
+    def _select_language(selected: fce.CodeLanguage) -> None:
+        set_lang(selected)
+        page.pop_dialog()
 
     # --- Font size ---
 
@@ -602,44 +613,31 @@ class EnhancedCodeEditor(ft.Column):
 
     # --- Search / Replace ---
 
-    @property
-    def search_bar(self) -> SearchReplaceBar:
-        """The search/replace bar control."""
-        return self._search_bar
+    def _toggle_read_only() -> None:
+        set_read_only(not read_only)
 
-    def _set_editor_selection(self, base: int, extent: int) -> None:
-        self._code_editor.selection = ft.TextSelection(
-            base_offset=base, extent_offset=extent
-        )
-        try:
-            self._code_editor.update()
-        except RuntimeError:
-            pass
+    def _toggle_ruff_on_save(_e=None) -> None:
+        set_ruff_on(not ruff_on)
 
-    def _focus_editor(self) -> None:
-        try:
-            asyncio.ensure_future(self._code_editor.focus())
-        except RuntimeError:
-            pass
+    def _toggle_gutter() -> None:
+        set_gutter_on(not gutter_on)
 
-    def _apply_replace_text(self, new_text: str) -> None:
-        self._code_editor.value = new_text
+    def _toggle_diff_pane() -> None:
+        set_diff_open(not diff_open)
 
-    async def _handle_find_click(self, _e) -> None:
-        await self._open_search(with_replace=False)
+    def _change_font_size(delta: int) -> None:
+        new_size = max(MIN_FONT_SIZE, min(MAX_FONT_SIZE, font_size + delta))
+        if new_size != font_size:
+            set_font_size(new_size)
 
-    async def _open_search(self, *, with_replace: bool = False) -> None:
-        self._search_bar.open(with_replace=with_replace)
-        self.page.update()
-        await self._search_bar.focus_search()
+    # --- Search ---
 
-    def _close_search(self) -> None:
-        self._search_bar.close()
-        self.page.update()
+    def _open_search(*, with_replace: bool = False) -> None:
+        set_search_with_replace(with_replace)
+        set_search_open(True)
 
-    def _on_search_closed(self) -> None:
-        """Called by SearchReplaceBar.close() — just update layout, don't call close again."""
-        self.page.update()
+    def _close_search() -> None:
+        set_search_open(False)
 
     # --- Go to Line ---
 
@@ -710,13 +708,60 @@ class EnhancedCodeEditor(ft.Column):
 
     # --- Keyboard shortcuts ---
 
-    async def _handle_keyboard(self, e: ft.KeyboardEvent):
-        if e.key == "Escape" and self._search_bar.is_open:
-            self._close_search()
-            return
+    async def _handle_goto_line(_e=None) -> None:
+        content = r.text
+        max_lines = content.count("\n") + 1
+        line_num = await goto_line_dialog(page, max_lines)
+        if line_num is not None:
+            offset = _line_to_offset(content, line_num)
+            _set_editor_selection(offset, offset)
+            await _focus_editor()
 
+    # --- Help / palette ---
+
+    def _show_help(_e=None) -> None:
+        show_help_dialog(page, HELP_TEXT)
+
+    async def _open_command_palette() -> None:
+        is_mac = platform.system() == "Darwin"
+        mod = "⌘" if is_mac else "Ctrl+"
+        shift_mod = "⇧⌘" if is_mac else "Ctrl+Shift+"
+        commands = [
+            ("Open File", f"{mod}O", _handle_open),
+            ("Save", f"{mod}S", lambda _e: _do_save()),
+            ("Save As", f"{shift_mod}S", lambda _e: _do_save_as()),
+            ("Close File", f"{mod}W", _do_close),
+            ("Revert to Saved", f"{shift_mod}R", _handle_revert),
+            ("Find", f"{mod}F", lambda _e: _open_search(with_replace=False)),
+            (
+                "Find and Replace",
+                f"⌥{mod}F" if is_mac else "Ctrl+H",
+                lambda _e: _open_search(with_replace=True),
+            ),
+            ("Go to Line", f"{mod}G", _handle_goto_line),
+            ("Toggle Diff", f"{mod}D", lambda _e: _toggle_diff_pane()),
+            ("Choose Theme", "", _handle_theme_click),
+            ("Choose Language", f"{shift_mod}L", _handle_language_click),
+            ("Toggle Read-Only", f"{mod}L", lambda _e: _toggle_read_only()),
+            ("Toggle Gutter", f"{shift_mod}G", lambda _e: _toggle_gutter()),
+            ("Increase Font Size", f"{mod}+", lambda _e: _change_font_size(1)),
+            ("Decrease Font Size", f"{mod}-", lambda _e: _change_font_size(-1)),
+            ("Help", "F1", _show_help),
+        ]
+        await open_command_palette(page, commands)
+
+    # --- Keyboard ---
+
+    async def _handle_keyboard(e: ft.KeyboardEvent) -> None:
+        if e.key == "Escape" and search_open:
+            _close_search()
+            return
+        if e.key == "F1":
+            _show_help()
+            return
         if not (e.meta or e.ctrl):
             return
+        is_mac = platform.system() == "Darwin"
         key = e.key.upper()
         if key == "F":
             await self._open_search(with_replace=False)
@@ -763,40 +808,246 @@ class EnhancedCodeEditor(ft.Column):
             if self._code_editor.language
             else "Plain Text"
         )
-        sel_info = f" | {len(selected_text)} chars selected" if selected_text else ""
-        self._status_bar.value = f"Ln {line}, Col {col} | {lang}{sel_info}"
-        self.update()
 
-    def _handle_change(self, _e):
-        content = self._code_editor.value or ""
-        if content != self._last_saved_content:
-            self._mark_dirty()
-        elif self._dirty:
-            self._dirty = False
-            self._save_btn.disabled = True
-            self._update_title()
+    if search_open:
+        controls.append(
+            SearchReplaceBar(
+                get_text=lambda: r.text,
+                set_selection=_set_editor_selection,
+                replace_text=_apply_replace_text,
+                focus_editor=_focus_editor_sync,
+                on_close=_close_search,
+                with_replace=search_with_replace,
+                text_version=text_version,
+            )
+        )
 
-        if self._search_bar.is_open:
-            self._search_bar.recompute()
-            self._search_bar._safe_update()
+    controls.append(ft.Divider(height=1, color=ft.Colors.GREY_800))
+
+    display, _name = _title_parts(current_path)
+    controls.append(
+        ft.Row(
+            alignment=ft.MainAxisAlignment.CENTER,
+            controls=[
+                ft.Text("File: ", size=12, color=ft.Colors.GREY_600),
+                ft.Text(
+                    display,
+                    size=12,
+                    color=ft.Colors.AMBER_600 if dirty else ft.Colors.GREY_600,
+                ),
+            ],
+        )
+    )
+
+    controls.append(editor_control)
+
+    if show_status_bar:
+        line, col, sel_len = status
+        lang_name = _language_display_name(lang) if lang else "Plain Text"
+        sel_info = f" | {sel_len} chars selected" if sel_len else ""
+        controls.append(
+            ft.Row(
+                controls=[
+                    ft.Text(
+                        f"Ln {line}, Col {col} | {lang_name}{sel_info}",
+                        size=12,
+                        color=ft.Colors.GREY_600,
+                    )
+                ]
+            )
+        )
+
+    if diff_open:
+        controls.append(
+            DiffPane(
+                original_text=r.last_saved,
+                current_text=r.text,
+                on_close=lambda: set_diff_open(False),
+                code_theme=theme,
+            )
+        )
+
+    return ft.Column(controls=controls, spacing=10, expand=expand)
+
+
+def _title_parts(current_path: str | None) -> tuple[str, str]:
+    if not current_path:
+        return "untitled", "untitled"
+    try:
+        display = "~/" + str(Path(current_path).relative_to(Path.home()))
+    except ValueError:
+        display = current_path
+    return display, Path(current_path).name
+
+
+def _divider() -> ft.Control:
+    return ft.Container(
+        content=ft.VerticalDivider(width=1, thickness=2, color=ft.Colors.GREY_600),
+        height=APPBAR_HEIGHT - 2,
+    )
+
+
+def _build_toolbar(
+    *,
+    dirty: bool,
+    read_only: bool,
+    ruff_on: bool,
+    gutter_on: bool,
+    diff_open: bool,
+    lang: fce.CodeLanguage,
+    on_open,
+    on_save,
+    on_save_as,
+    on_close,
+    on_revert,
+    on_find,
+    on_goto,
+    on_font_dec,
+    on_font_inc,
+    font_size: int,
+    on_diff,
+    on_lock,
+    on_ruff,
+    on_gutter,
+    on_lang,
+    on_theme,
+    on_help,
+) -> ft.Control:
+    return ft.Row(
+        spacing=0,
+        controls=[
+            ft.IconButton(
+                ft.Icons.FILE_OPEN,
+                icon_size=ICON_SIZE,
+                tooltip="Open (⌘O)",
+                on_click=on_open,
+            ),
+            ft.IconButton(
+                ft.Icons.SAVE,
+                icon_size=ICON_SIZE,
+                tooltip="Save (⌘S)",
+                on_click=on_save,
+                disabled=not dirty,
+            ),
+            ft.IconButton(
+                ft.Icons.SAVE_AS,
+                icon_size=ICON_SIZE,
+                tooltip="Save As (⇧⌘S)",
+                on_click=on_save_as,
+            ),
+            ft.IconButton(
+                ft.Icons.CLOSE,
+                icon_size=ICON_SIZE,
+                tooltip="Close File (⌘W) ",
+                on_click=on_close,
+            ),
+            ft.IconButton(
+                ft.Icons.SETTINGS_BACKUP_RESTORE,
+                icon_size=ICON_SIZE,
+                tooltip="Revert to Saved (⇧⌘R)",
+                on_click=on_revert,
+                disabled=not dirty,
+            ),
+            _divider(),
+            ft.IconButton(
+                ft.Icons.SEARCH,
+                icon_size=ICON_SIZE,
+                tooltip="Find (⌘F)",
+                on_click=on_find,
+            ),
+            ft.IconButton(
+                ft.Icons.FORMAT_LIST_NUMBERED,
+                icon_size=ICON_SIZE,
+                tooltip="Go to Line (⌘G)",
+                on_click=on_goto,
+            ),
+            ft.IconButton(
+                ft.Icons.REMOVE,
+                icon_size=ICON_SIZE,
+                tooltip="Decrease Font Size (⌘-)",
+                on_click=on_font_dec,
+            ),
+            ft.Text(f"{font_size}px", size=11, color=ft.Colors.GREY_600),
+            ft.IconButton(
+                ft.Icons.ADD,
+                icon_size=ICON_SIZE,
+                tooltip="Increase Font Size (⌘+)",
+                on_click=on_font_inc,
+            ),
+            _divider(),
+            ft.IconButton(
+                ft.Icons.DIFFERENCE,
+                icon_size=ICON_SIZE,
+                tooltip="Toggle Diff (⌘D)",
+                icon_color=TOGGLE_ACTIVE_COLOR if diff_open else None,
+                on_click=on_diff,
+            ),
+            ft.IconButton(
+                ft.Icons.LOCK if read_only else ft.Icons.LOCK_OPEN,
+                icon_size=ICON_SIZE,
+                icon_color=TOGGLE_ACTIVE_COLOR if read_only else None,
+                tooltip="Unlock Editing (⌘L)" if read_only else "Toggle Read-Only (⌘L)",
+                on_click=on_lock,
+            ),
+            ft.IconButton(
+                ft.Icons.AUTO_FIX_HIGH if ruff_on else ft.Icons.AUTO_FIX_OFF,
+                icon_size=ICON_SIZE,
+                icon_color=TOGGLE_ACTIVE_COLOR if ruff_on else None,
+                tooltip="Ruff on Save: ON" if ruff_on else "Ruff on Save: OFF",
+                on_click=on_ruff,
+            ),
+            ft.IconButton(
+                ft.Icons.FORMAT_LIST_NUMBERED_RTL,
+                icon_size=ICON_SIZE,
+                icon_color=TOGGLE_ACTIVE_COLOR if gutter_on else None,
+                tooltip="Hide Gutter (⇧⌘G)" if gutter_on else "Show Gutter (⇧⌘G)",
+                on_click=on_gutter,
+            ),
+            ft.Container(expand=True),  # spacer to push right-side controls
+            ft.TextButton(
+                _language_display_name(lang),
+                style=ft.ButtonStyle(text_style=ft.TextStyle(size=11)),
+                tooltip="Change Language (⇧⌘L)",
+                on_click=on_lang,
+            ),
+            ft.IconButton(
+                ft.Icons.PALETTE,
+                icon_size=ICON_SIZE,
+                tooltip="Choose Editor Theme",
+                on_click=on_theme,
+            ),
+            ft.IconButton(
+                ft.Icons.HELP_OUTLINE,
+                icon_size=ICON_SIZE,
+                tooltip="Help (F1)",
+                on_click=on_help,
+            ),
+        ],
+    )
 
 
 def main(page: ft.Page):
     """Flet main entry point — standalone demo of the EnhancedCodeEditor."""
     page.title = "CodeEditor"
+    page.window.width = 800
+    page.window.height = 1200
 
     def _on_title_change(display, name, is_dirty):
         page.title = f"{name}{'*' if is_dirty else ''} — CodeEditor"
-        page.update()
 
-    editor = EnhancedCodeEditor(
-        expand=True,
-        on_title_change=_on_title_change,
+    handle = EditorHandle()
+    initial = sys.argv[1] if len(sys.argv) > 1 else None
+
+    page.render(
+        lambda: EnhancedCodeEditor(
+            expand=True,
+            on_title_change=_on_title_change,
+            handle=handle,
+            initial_path=initial,
+        )
     )
-    # page.add(
-    #     appbar
-    #     )
-    page.add(editor)
+
+    page.run_task(page.window.center)
 
 
 def run():

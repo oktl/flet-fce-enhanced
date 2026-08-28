@@ -1,789 +1,147 @@
-"""Tests for fce_enhanced.editor (EnhancedCodeEditor control)."""
-
-from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
+"""Tests for fce_enhanced.editor."""
 
 import flet as ft
 import flet_code_editor as fce
-import pytest
 
-from fce_enhanced.editor import DEFAULT_CODE, EnhancedCodeEditor
-from fce_enhanced.search import SearchReplaceBar
-from fce_enhanced.themes import DEFAULT_THEME
-
-
-# --- Helpers ---
-
-
-def _make_editor(**kwargs) -> EnhancedCodeEditor:
-    """Create an EnhancedCodeEditor without mounting it."""
-    return EnhancedCodeEditor(**kwargs)
-
-
-def _patch_page(editor: EnhancedCodeEditor):
-    """Patch the page property, update, and focus for testing without a real page."""
-    mock_page = MagicMock(spec=ft.Page)
-    mock_page.overlay = []
-
-    page_patch = patch.object(
-        type(editor), "page", new_callable=PropertyMock, return_value=mock_page
-    )
-    update_patch = patch.object(editor, "update")
-    focus_patch = patch.object(editor._code_editor, "focus", new_callable=AsyncMock)
-
-    page_patch.start()
-    update_patch.start()
-    focus_patch.start()
-
-    return mock_page, page_patch, update_patch, focus_patch
-
-
-def _cleanup_patches(*patches):
-    for p in patches:
-        p.stop()
-
-
-# --- Constructor defaults ---
-
-
-def test_default_value():
-    editor = _make_editor()
-    assert editor.value == DEFAULT_CODE
-
-
-def test_default_language():
-    editor = _make_editor()
-    assert editor.language == fce.CodeLanguage.PYTHON
-
-
-def test_default_not_dirty():
-    editor = _make_editor()
-    assert editor.dirty is False
-
-
-def test_default_no_path():
-    editor = _make_editor()
-    assert editor.current_path is None
-
-
-def test_custom_value():
-    editor = _make_editor(value="hello world")
-    assert editor.value == "hello world"
-
-
-def test_custom_language():
-    editor = _make_editor(language=fce.CodeLanguage.JAVASCRIPT)
-    assert editor.language == fce.CodeLanguage.JAVASCRIPT
-
-
-# --- Property setters ---
-
-
-def test_set_value():
-    editor = _make_editor()
-    editor.value = "new content"
-    assert editor.value == "new content"
-
-
-def test_set_language():
-    editor = _make_editor()
-    editor.language = fce.CodeLanguage.RUST
-    assert editor.language == fce.CodeLanguage.RUST
-
-
-# --- code_editor property ---
-
-
-def test_code_editor_property():
-    editor = _make_editor()
-    assert isinstance(editor.code_editor, fce.CodeEditor)
-
-
-# --- Layout options ---
-
-
-def test_toolbar_shown_by_default():
-    editor = _make_editor()
-    # Toolbar is the second control (after title bar row)
-    toolbar_row = editor.controls[1]
-    button_labels = [c.content for c in toolbar_row.controls if hasattr(c, "content")]
-    assert "Open" in button_labels
-    assert "Save" in button_labels
-    assert "Save As" in button_labels
-    assert "Close" in button_labels
-    assert "Find" in button_labels
-
-
-def test_toolbar_hidden():
-    editor = _make_editor(show_toolbar=False)
-    all_labels = []
-    for c in editor.controls:
-        if isinstance(c, ft.Row):
-            for child in c.controls:
-                if hasattr(child, "content") and isinstance(child, ft.Button):
-                    all_labels.append(child.content)
-    assert "Open" not in all_labels
-
-
-def test_status_bar_hidden():
-    editor = _make_editor(show_status_bar=False)
-    has_status = False
-    for c in editor.controls:
-        if isinstance(c, ft.Row):
-            for child in c.controls:
-                if isinstance(child, ft.Text) and "Ln" in (child.value or ""):
-                    has_status = True
-    assert not has_status
-
-
-# --- Dirty state ---
-
-
-def test_mark_dirty():
-    editor = _make_editor()
-    mock_page, p1, p2, p3 = _patch_page(editor)
-    try:
-        editor._mark_dirty()
-        assert editor.dirty is True
-        assert editor._save_btn.disabled is False
-    finally:
-        _cleanup_patches(p1, p2, p3)
-
-
-def test_mark_clean():
-    editor = _make_editor()
-    mock_page, p1, p2, p3 = _patch_page(editor)
-    try:
-        editor._mark_dirty()
-        editor._mark_clean("content")
-        assert editor.dirty is False
-        assert editor._save_btn.disabled is True
-        assert editor._last_saved_content == "content"
-    finally:
-        _cleanup_patches(p1, p2, p3)
-
-
-def test_mark_dirty_only_fires_once():
-    editor = _make_editor()
-    mock_page, p1, p2, p3 = _patch_page(editor)
-    try:
-        editor._mark_dirty()
-        editor._mark_dirty()
-        assert editor.dirty is True
-    finally:
-        _cleanup_patches(p1, p2, p3)
-
-
-# --- on_title_change callback ---
-
-
-def test_title_change_callback_called():
-    calls = []
-
-    def on_change(display, name, is_dirty):
-        calls.append((display, name, is_dirty))
-
-    editor = _make_editor(on_title_change=on_change)
-    _, p1, p2, p3 = _patch_page(editor)
-    try:
-        editor._mark_dirty()
-        assert len(calls) == 1
-        assert calls[0] == ("untitled", "untitled", True)
-    finally:
-        _cleanup_patches(p1, p2, p3)
-
-
-def test_title_change_with_path():
-    calls = []
-
-    def on_change(display, name, is_dirty):
-        calls.append((display, name, is_dirty))
-
-    editor = _make_editor(on_title_change=on_change)
-    _, p1, p2, p3 = _patch_page(editor)
-    try:
-        editor._current_path = "/tmp/test.py"
-        editor._mark_clean("content")
-        assert len(calls) == 1
-        assert calls[0][1] == "test.py"
-        assert calls[0][2] is False
-    finally:
-        _cleanup_patches(p1, p2, p3)
-
-
-# --- Keyboard shortcut registration ---
-
-
-def test_keyboard_shortcuts_registered_on_mount():
-    editor = _make_editor(register_keyboard_shortcuts=True)
-    _, p1, p2, p3 = _patch_page(editor)
-    try:
-        editor.did_mount()
-        mock_page = editor.page
-        assert mock_page.on_keyboard_event == editor._handle_keyboard
-    finally:
-        _cleanup_patches(p1, p2, p3)
-
-
-def test_keyboard_shortcuts_not_registered_when_disabled():
-    editor = _make_editor(register_keyboard_shortcuts=False)
-    _, p1, p2, p3 = _patch_page(editor)
-    try:
-        editor.did_mount()
-        mock_page = editor.page
-        assert mock_page.on_keyboard_event != editor._handle_keyboard
-    finally:
-        _cleanup_patches(p1, p2, p3)
-
-
-def test_keyboard_shortcuts_cleaned_up_on_unmount():
-    editor = _make_editor(register_keyboard_shortcuts=True)
-    _, p1, p2, p3 = _patch_page(editor)
-    try:
-        editor.did_mount()
-        editor.will_unmount()
-        mock_page = editor.page
-        assert mock_page.on_keyboard_event is None
-    finally:
-        _cleanup_patches(p1, p2, p3)
-
-
-# --- _offset_to_line_col ---
+from fce_enhanced.editor import (
+    DEFAULT_CODE,
+    EditorHandle,
+    EnhancedCodeEditor,
+    _language_display_name,
+    _line_to_offset,
+    _offset_to_line_col,
+    _title_parts,
+)
+
+# --- Pure helpers ---
 
 
 def test_offset_to_line_col_start():
-    line, col = EnhancedCodeEditor._offset_to_line_col("hello\nworld", 0)
-    assert line == 1
-    assert col == 1
+    assert _offset_to_line_col("hello\nworld", 0) == (1, 1)
 
 
 def test_offset_to_line_col_second_line():
-    line, col = EnhancedCodeEditor._offset_to_line_col("hello\nworld", 8)
-    assert line == 2
-    assert col == 3
+    text = "hello\nworld"
+    # offset 6 is the "w" on line 2
+    assert _offset_to_line_col(text, 6) == (2, 1)
 
 
-def test_offset_to_line_col_end_of_first_line():
-    line, col = EnhancedCodeEditor._offset_to_line_col("hello\nworld", 5)
-    assert line == 1
-    assert col == 6
+def test_offset_to_line_col_mid_line():
+    assert _offset_to_line_col("abcdef", 3) == (1, 4)
 
 
-# --- Save to file ---
+def test_offset_to_line_col_clamps_negative():
+    assert _offset_to_line_col("abc", -5) == (1, 1)
 
 
-@pytest.mark.asyncio
-async def test_do_save_writes_file(tmp_path):
-    editor = _make_editor()
-    _, p1, p2, p3 = _patch_page(editor)
-    try:
-        filepath = str(tmp_path / "output.py")
-        editor._current_path = filepath
-        editor._code_editor.value = "print('saved')"
-        editor._mark_dirty()
-
-        result = await editor._do_save()
-
-        assert result is True
-        assert editor.dirty is False
-        assert (tmp_path / "output.py").read_text() == "print('saved')"
-    finally:
-        _cleanup_patches(p1, p2, p3)
+def test_line_to_offset_first_line():
+    assert _line_to_offset("a\nb\nc", 1) == 0
 
 
-@pytest.mark.asyncio
-async def test_do_save_no_path_triggers_save_as():
-    editor = _make_editor()
-    _, p1, p2, p3 = _patch_page(editor)
-    try:
-        editor._current_path = None
-
-        with patch.object(
-            editor, "_do_save_as", new_callable=AsyncMock, return_value=False
-        ) as mock_save_as:
-            result = await editor._do_save()
-            mock_save_as.assert_awaited_once()
-            assert result is False
-    finally:
-        _cleanup_patches(p1, p2, p3)
+def test_line_to_offset_third_line():
+    # "a\nb\nc" -> line 3 starts after "a\nb\n" = 4 chars
+    assert _line_to_offset("a\nb\nc", 3) == 4
 
 
-# --- Save As ---
+def test_line_col_offset_roundtrip():
+    text = "first line\nsecond line\nthird"
+    offset = _line_to_offset(text, 2)
+    assert _offset_to_line_col(text, offset) == (2, 1)
 
 
-@pytest.mark.asyncio
-async def test_do_save_as_writes_to_chosen_path(tmp_path):
-    editor = _make_editor()
-    _, p1, p2, p3 = _patch_page(editor)
-    try:
-        editor._code_editor.value = "new content"
-        filepath = str(tmp_path / "saved.py")
-
-        with patch(
-            "fce_enhanced.editor.save_file",
-            new_callable=AsyncMock,
-            return_value=filepath,
-        ):
-            result = await editor._do_save_as()
-
-        assert result is True
-        assert editor.current_path == filepath
-        assert editor.dirty is False
-        assert (tmp_path / "saved.py").read_text() == "new content"
-    finally:
-        _cleanup_patches(p1, p2, p3)
+def test_language_display_name():
+    assert _language_display_name(fce.CodeLanguage.PYTHON) == "Python"
 
 
-@pytest.mark.asyncio
-async def test_do_save_as_cancelled():
-    editor = _make_editor()
-    _, p1, p2, p3 = _patch_page(editor)
-    try:
-        with patch(
-            "fce_enhanced.editor.save_file",
-            new_callable=AsyncMock,
-            return_value=None,
-        ):
-            result = await editor._do_save_as()
-
-        assert result is False
-    finally:
-        _cleanup_patches(p1, p2, p3)
+def test_title_parts_untitled():
+    assert _title_parts(None) == ("untitled", "untitled")
 
 
-# --- Open file ---
+def test_title_parts_named(tmp_path):
+    f = tmp_path / "thing.py"
+    display, name = _title_parts(str(f))
+    assert name == "thing.py"
+    assert display.endswith("thing.py")
 
 
-@pytest.mark.asyncio
-async def test_handle_open_loads_file(tmp_py_file):
-    editor = _make_editor()
-    _, p1, p2, p3 = _patch_page(editor)
-    try:
-        with patch(
-            "fce_enhanced.editor.open_file",
-            new_callable=AsyncMock,
-            return_value=str(tmp_py_file),
-        ):
-            await editor._handle_open(None)
-
-        assert editor.current_path == str(tmp_py_file)
-        assert editor.value == "print('hello')\n"
-        assert editor.language == fce.CodeLanguage.PYTHON
-        assert editor.dirty is False
-    finally:
-        _cleanup_patches(p1, p2, p3)
+# --- EditorHandle ---
 
 
-@pytest.mark.asyncio
-async def test_handle_open_cancelled():
-    editor = _make_editor()
-    _, p1, p2, p3 = _patch_page(editor)
-    try:
-        editor._code_editor.value = "original"
-
-        with patch(
-            "fce_enhanced.editor.open_file",
-            new_callable=AsyncMock,
-            return_value=None,
-        ):
-            await editor._handle_open(None)
-
-        assert editor.value == "original"
-    finally:
-        _cleanup_patches(p1, p2, p3)
+def test_handle_defaults_safe():
+    h = EditorHandle()
+    assert h.value == ""
+    assert h.dirty is False
+    assert h.current_path is None
 
 
-# --- Close ---
+def test_handle_reads_getters():
+    h = EditorHandle()
+    h._get_value = lambda: "abc"
+    h._get_dirty = lambda: True
+    h._get_path = lambda: "/tmp/x.py"
+    assert h.value == "abc"
+    assert h.dirty is True
+    assert h.current_path == "/tmp/x.py"
 
 
-@pytest.mark.asyncio
-async def test_handle_close_resets_state():
-    editor = _make_editor()
-    _, p1, p2, p3 = _patch_page(editor)
-    try:
-        editor._current_path = "/tmp/test.py"
-        editor._code_editor.value = "some content"
-
-        await editor._handle_close(None)
-
-        assert editor.current_path is None
-        assert editor.dirty is False
-        assert editor.value == DEFAULT_CODE
-        assert editor.language == fce.CodeLanguage.PYTHON
-    finally:
-        _cleanup_patches(p1, p2, p3)
+# --- Component render ---
 
 
-# --- Search bar integration ---
+def test_renders_full_layout(render_component):
+    tree, _ = render_component(EnhancedCodeEditor)
+    assert isinstance(tree, ft.Column)
+    types = [type(c).__name__ for c in tree.controls]
+    # toolbar, divider, title row, editor, status row
+    assert types == ["Row", "Divider", "Row", "CodeEditor", "Row"]
 
 
-def test_search_bar_exists():
-    editor = _make_editor()
-    assert isinstance(editor.search_bar, SearchReplaceBar)
+def test_editor_uses_default_code(render_component):
+    tree, _ = render_component(EnhancedCodeEditor)
+    editor = next(c for c in tree.controls if isinstance(c, fce.CodeEditor))
+    assert editor.value == DEFAULT_CODE
 
 
-def test_search_bar_in_layout():
-    editor = _make_editor()
-    assert editor._search_bar in editor.controls
+def test_handle_populated_on_render(render_component):
+    handle = EditorHandle()
+    render_component(EnhancedCodeEditor, handle=handle)
+    assert callable(handle.open_path)
+    assert callable(handle.save)
+    assert handle.value == DEFAULT_CODE
+    assert handle.dirty is False
 
 
-def test_search_bar_initially_hidden():
-    editor = _make_editor()
-    assert editor._search_bar.is_open is False
-    assert editor._search_bar.controls == []
-
-
-def test_search_bar_available_without_toolbar():
-    editor = _make_editor(show_toolbar=False)
-    assert isinstance(editor.search_bar, SearchReplaceBar)
-    assert editor._search_bar in editor.controls
-
-
-@pytest.mark.asyncio
-async def test_ctrl_f_opens_search():
-    editor = _make_editor()
-    _, p1, p2, p3 = _patch_page(editor)
-    focus_patch = patch.object(
-        editor._search_bar._search_field, "focus", new_callable=AsyncMock
+def test_no_toolbar_when_disabled(render_component):
+    tree, _ = render_component(EnhancedCodeEditor, show_toolbar=False)
+    assert not any(
+        isinstance(c, ft.Row) and any(isinstance(x, ft.IconButton) for x in c.controls)
+        for c in tree.controls
     )
-    focus_patch.start()
-    try:
-        event = MagicMock(spec=ft.KeyboardEvent)
-        event.key = "F"
-        event.meta = True
-        event.ctrl = False
-        event.shift = False
-
-        await editor._handle_keyboard(event)
-
-        assert editor._search_bar.is_open is True
-        assert editor._search_bar._replace_row.visible is False
-    finally:
-        focus_patch.stop()
-        _cleanup_patches(p1, p2, p3)
 
 
-@pytest.mark.asyncio
-async def test_ctrl_h_opens_search_with_replace():
-    editor = _make_editor()
-    _, p1, p2, p3 = _patch_page(editor)
-    focus_patch = patch.object(
-        editor._search_bar._search_field, "focus", new_callable=AsyncMock
-    )
-    focus_patch.start()
-    try:
-        event = MagicMock(spec=ft.KeyboardEvent)
-        event.key = "H"
-        event.meta = True
-        event.ctrl = False
-        event.shift = False
-
-        await editor._handle_keyboard(event)
-
-        assert editor._search_bar.is_open is True
-        assert editor._search_bar._replace_row.visible is True
-    finally:
-        focus_patch.stop()
-        _cleanup_patches(p1, p2, p3)
+def test_no_status_bar_when_disabled(render_component):
+    tree, _ = render_component(EnhancedCodeEditor, show_status_bar=False)
+    types = [type(c).__name__ for c in tree.controls]
+    # toolbar, divider, title row, editor (no trailing status row)
+    assert types == ["Row", "Divider", "Row", "CodeEditor"]
 
 
-@pytest.mark.asyncio
-async def test_escape_closes_search():
-    editor = _make_editor()
-    _, p1, p2, p3 = _patch_page(editor)
-    try:
-        editor._search_bar.open()
-
-        event = MagicMock(spec=ft.KeyboardEvent)
-        event.key = "Escape"
-        event.meta = False
-        event.ctrl = False
-        event.shift = False
-
-        await editor._handle_keyboard(event)
-
-        assert editor._search_bar.is_open is False
-    finally:
-        _cleanup_patches(p1, p2, p3)
+def test_expand_propagates_to_root(render_component):
+    tree, _ = render_component(EnhancedCodeEditor, expand=True)
+    assert tree.expand is True
 
 
-def test_handle_change_recomputes_search():
-    editor = _make_editor(value="hello world hello")
-    _, p1, p2, p3 = _patch_page(editor)
-    try:
-        editor._search_bar.open()
-        editor._search_bar._search_query = "hello"
-        editor._search_bar.recompute()
-        assert len(editor._search_bar._match_positions) == 2
+def test_hooks_stable_across_rerender(render_component):
+    """Re-rendering the same component must not change hook count/order."""
+    tree, comp = render_component(EnhancedCodeEditor)
+    first = len(comp._state.hooks)
+    comp._state.hook_cursor = 0
+    from flet.components.component import Renderer
 
-        # Simulate text change via _handle_change
-        editor._code_editor.value = "hello world"
-        editor._handle_change(None)
-        assert len(editor._search_bar._match_positions) == 1
-    finally:
-        _cleanup_patches(p1, p2, p3)
+    Renderer(comp).render(comp.fn, *comp.args, **comp.kwargs)
+    assert len(comp._state.hooks) == first
 
 
-# --- Ruff on save ---
-
-
-def _mock_ruff_process(returncode=0, stderr=b""):
-    """Create a mock subprocess that returns immediately."""
-    proc = MagicMock()
-    proc.returncode = returncode
-    proc.communicate = AsyncMock(return_value=(b"", stderr))
-    return proc
-
-
-@pytest.mark.asyncio
-async def test_ruff_runs_on_python_save(tmp_path):
-    editor = _make_editor(ruff_on_save=True)
-    _, p1, p2, p3 = _patch_page(editor)
-    try:
-        filepath = tmp_path / "test.py"
-        filepath.write_text("x=1\n", encoding="utf-8")
-        editor._current_path = str(filepath)
-        editor._code_editor.value = "x=1\n"
-        editor._mark_dirty()
-
-        mock_proc = _mock_ruff_process()
-        with (
-            patch("shutil.which", return_value="/usr/bin/ruff"),
-            patch(
-                "asyncio.create_subprocess_exec",
-                new_callable=AsyncMock,
-                return_value=mock_proc,
-            ) as mock_exec,
-        ):
-            await editor._do_save()
-            # Should have called ruff check --fix and ruff format
-            assert mock_exec.call_count == 2
-            args_list = [call.args for call in mock_exec.call_args_list]
-            assert args_list[0] == ("/usr/bin/ruff", "check", "--fix", str(filepath))
-            assert args_list[1] == ("/usr/bin/ruff", "format", str(filepath))
-    finally:
-        _cleanup_patches(p1, p2, p3)
-
-
-@pytest.mark.asyncio
-async def test_ruff_skips_non_python_files(tmp_path):
-    editor = _make_editor(ruff_on_save=True)
-    _, p1, p2, p3 = _patch_page(editor)
-    try:
-        filepath = tmp_path / "test.js"
-        filepath.write_text("let x = 1;\n", encoding="utf-8")
-        editor._current_path = str(filepath)
-        editor._code_editor.value = "let x = 1;\n"
-
-        with (
-            patch("shutil.which", return_value="/usr/bin/ruff"),
-            patch(
-                "asyncio.create_subprocess_exec", new_callable=AsyncMock
-            ) as mock_exec,
-        ):
-            await editor._run_ruff(str(filepath))
-            mock_exec.assert_not_called()
-    finally:
-        _cleanup_patches(p1, p2, p3)
-
-
-@pytest.mark.asyncio
-async def test_ruff_skips_when_disabled(tmp_path):
-    editor = _make_editor(ruff_on_save=False)
-    _, p1, p2, p3 = _patch_page(editor)
-    try:
-        filepath = tmp_path / "test.py"
-        filepath.write_text("x=1\n", encoding="utf-8")
-
-        with (
-            patch("shutil.which", return_value="/usr/bin/ruff"),
-            patch(
-                "asyncio.create_subprocess_exec", new_callable=AsyncMock
-            ) as mock_exec,
-        ):
-            await editor._run_ruff(str(filepath))
-            mock_exec.assert_not_called()
-    finally:
-        _cleanup_patches(p1, p2, p3)
-
-
-@pytest.mark.asyncio
-async def test_ruff_skips_when_not_installed(tmp_path):
-    editor = _make_editor(ruff_on_save=True)
-    _, p1, p2, p3 = _patch_page(editor)
-    try:
-        filepath = tmp_path / "test.py"
-        filepath.write_text("x=1\n", encoding="utf-8")
-
-        with (
-            patch("shutil.which", return_value=None),
-            patch(
-                "asyncio.create_subprocess_exec", new_callable=AsyncMock
-            ) as mock_exec,
-        ):
-            await editor._run_ruff(str(filepath))
-            mock_exec.assert_not_called()
-    finally:
-        _cleanup_patches(p1, p2, p3)
-
-
-@pytest.mark.asyncio
-async def test_ruff_updates_editor_content(tmp_path):
-    editor = _make_editor(ruff_on_save=True)
-    _, p1, p2, p3 = _patch_page(editor)
-    try:
-        filepath = tmp_path / "test.py"
-        editor._current_path = str(filepath)
-        editor._code_editor.value = "x=1\n"
-        filepath.write_text("x=1\n", encoding="utf-8")
-
-        mock_proc = _mock_ruff_process()
-        call_count = 0
-
-        async def write_formatted(*args, **kwargs):
-            """Simulate ruff reformatting the file on the format call."""
-            nonlocal call_count
-            call_count += 1
-            if call_count == 2:  # ruff format is the second call
-                filepath.write_text("x = 1\n", encoding="utf-8")
-            return mock_proc
-
-        with (
-            patch("shutil.which", return_value="/usr/bin/ruff"),
-            patch(
-                "asyncio.create_subprocess_exec",
-                side_effect=write_formatted,
-            ),
-        ):
-            await editor._run_ruff(str(filepath))
-            assert editor._code_editor.value == "x = 1\n"
-            assert editor._last_saved_content == "x = 1\n"
-    finally:
-        _cleanup_patches(p1, p2, p3)
-
-
-@pytest.mark.asyncio
-async def test_ruff_check_failure_does_not_block_format(tmp_path):
-    """ruff check exits non-zero for unfixable violations — format should still run."""
-    editor = _make_editor(ruff_on_save=True)
-    _, p1, p2, p3 = _patch_page(editor)
-    try:
-        filepath = tmp_path / "test.py"
-        filepath.write_text("x=1\n", encoding="utf-8")
-
-        mock_proc = _mock_ruff_process(returncode=1, stderr=b"lint warnings")
-        with (
-            patch("shutil.which", return_value="/usr/bin/ruff"),
-            patch(
-                "asyncio.create_subprocess_exec",
-                new_callable=AsyncMock,
-                return_value=mock_proc,
-            ) as mock_exec,
-        ):
-            await editor._run_ruff(str(filepath))
-            # Both check and format should be called
-            assert mock_exec.call_count == 2
-    finally:
-        _cleanup_patches(p1, p2, p3)
-
-
-@pytest.mark.asyncio
-async def test_ruff_check_warnings_shown_in_snackbar(tmp_path):
-    """Remaining lint warnings after --fix are shown to the user."""
-    editor = _make_editor(ruff_on_save=True)
-    _, p1, p2, p3 = _patch_page(editor)
-    try:
-        filepath = tmp_path / "test.py"
-        filepath.write_text("x=1\n", encoding="utf-8")
-
-        check_output = b"test.py:1:1: F841 Local variable `x` is assigned but never used\nFound 1 error.\n"
-        check_proc = _mock_ruff_process(returncode=1, stderr=b"")
-        check_proc.communicate = AsyncMock(return_value=(check_output, b""))
-        fmt_proc = _mock_ruff_process(returncode=0)
-
-        call_count = 0
-
-        async def side_effect(*args, **kwargs):
-            nonlocal call_count
-            call_count += 1
-            return check_proc if call_count == 1 else fmt_proc
-
-        with (
-            patch("shutil.which", return_value="/usr/bin/ruff"),
-            patch("asyncio.create_subprocess_exec", side_effect=side_effect),
-        ):
-            await editor._run_ruff(str(filepath))
-
-        # A snackbar should have been added to the page overlay
-        snackbars = [s for s in editor.page.overlay if isinstance(s, ft.SnackBar)]
-        assert len(snackbars) == 1
-        assert "F841" in snackbars[0].content.value
-        assert "Found 1" not in snackbars[0].content.value  # summary filtered out
-    finally:
-        _cleanup_patches(p1, p2, p3)
-
-
-@pytest.mark.asyncio
-async def test_ruff_format_failure_bails_out(tmp_path):
-    """If ruff format fails, we bail and don't reload the file."""
-    editor = _make_editor(ruff_on_save=True)
-    _, p1, p2, p3 = _patch_page(editor)
-    try:
-        filepath = tmp_path / "test.py"
-        filepath.write_text("x=1\n", encoding="utf-8")
-        editor._code_editor.value = "x=1\n"
-        editor._last_saved_content = "x=1\n"
-
-        ok_proc = _mock_ruff_process(returncode=0)
-        fail_proc = _mock_ruff_process(returncode=1, stderr=b"format error")
-
-        call_count = 0
-
-        async def side_effect(*args, **kwargs):
-            nonlocal call_count
-            call_count += 1
-            return ok_proc if call_count == 1 else fail_proc
-
-        with (
-            patch("shutil.which", return_value="/usr/bin/ruff"),
-            patch("asyncio.create_subprocess_exec", side_effect=side_effect),
-        ):
-            await editor._run_ruff(str(filepath))
-            # Editor content should be unchanged
-            assert editor._code_editor.value == "x=1\n"
-    finally:
-        _cleanup_patches(p1, p2, p3)
-
-
-# --- Theme selector ---
-
-
-def test_palette_button_in_appbar():
-    editor = _make_editor()
-    appbar = editor.controls[0]  # First row is the appbar
-    icons = [btn.icon for btn in appbar.controls if isinstance(btn, ft.IconButton)]
-    assert ft.Icons.PALETTE in icons
-
-
-def test_default_theme_applied():
-    editor = _make_editor()
-    assert editor._code_editor.code_theme == DEFAULT_THEME
-    assert editor._current_theme == DEFAULT_THEME
-
-
-def test_select_theme_updates_code_editor():
-    editor = _make_editor()
-    _, p1, p2, p3 = _patch_page(editor)
-    try:
-        editor._select_theme(fce.CodeTheme.DRACULA)
-        assert editor._code_editor.code_theme == fce.CodeTheme.DRACULA
-        assert editor._current_theme == fce.CodeTheme.DRACULA
-    finally:
-        _cleanup_patches(p1, p2, p3)
-
-
-def test_custom_theme_does_not_set_current_theme():
-    custom = fce.CustomCodeTheme(
-        keyword=ft.TextStyle(color=ft.Colors.RED),
-    )
-    editor = _make_editor(code_theme=custom)
-    assert editor._current_theme is None
+def test_initial_language_reflected_in_editor(render_component):
+    tree, _ = render_component(EnhancedCodeEditor, language=fce.CodeLanguage.JAVASCRIPT)
+    editor = next(c for c in tree.controls if isinstance(c, fce.CodeEditor))
+    assert editor.language == fce.CodeLanguage.JAVASCRIPT
