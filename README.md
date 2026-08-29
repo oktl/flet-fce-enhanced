@@ -125,6 +125,11 @@ ft.run(main)
 
 > `initial_path` opens a file automatically on mount — the simplest way to load
 > a file at startup without touching the handle.
+>
+> `save_path` is the opposite: it seeds the save target *without* reading from
+> disk, so the content you pass in `value` stays on screen and Save writes to a
+> path that need not exist yet. Use it when the buffer comes from somewhere
+> other than the filesystem.
 
 #### Constructor parameters
 
@@ -144,6 +149,7 @@ ft.run(main)
 | `on_title_change`             | `callable`     | `None`           | Callback `(display_path, name, is_dirty)` — fires on file open/close, save, and dirty-state changes. `display_path` is the home-relative path (e.g. `~/projects/foo.py`) or `"untitled"`. |
 | `ruff_on_save`                | `bool`         | `False`          | Auto-format Python files with ruff on save |
 | `initial_path`                | `str`          | `None`           | File to open automatically on mount        |
+| `save_path`                   | `str`          | `None`           | Save target seeded on mount without reading from disk (keeps `value`); ignored when `initial_path` is set |
 | `handle`                      | `EditorHandle` | `None`           | Imperative handle for driving the editor   |
 | `expand`                      | `bool`         | `False`          | Expand the root column to fill its parent  |
 
@@ -156,11 +162,29 @@ handle.open_path("/path/to/file")  # load a file (no dialog)
 handle.save()                      # save to current path
 handle.save_as()                   # save-as dialog
 handle.close()                     # close current file
+handle.revert()                    # revert to last saved content (confirms)
+
+handle.open_search(with_replace=True)  # open the find/replace bar
+handle.close_search()
+handle.goto_line()                 # go-to-line dialog
+handle.command_palette()           # command palette
+handle.show_help()                 # help dialog
+
+handle.toggle_diff()               # show/hide the diff pane
+handle.toggle_read_only()
+handle.toggle_gutter()
+handle.change_font_size(+1)        # or -1
+handle.set_language(fce.CodeLanguage.PYTHON)  # set directly
+handle.choose_language()           # or open the language picker
 
 handle.value          # current editor content (str)
 handle.current_path   # path of open file, or None
 handle.dirty          # True if there are unsaved changes
+handle.search_open    # True while the find/replace bar is shown
 ```
+
+Every action is safe to call from an embedder's own keyboard handler — pair it
+with `register_keyboard_shortcuts=False` to own the key bindings yourself.
 
 #### Other public exports
 

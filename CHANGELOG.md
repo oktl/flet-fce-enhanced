@@ -4,6 +4,24 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.2.2] - 2026-08-28
+
+### Added
+
+- `EditorHandle` now exposes every editor action, so embedders no longer need to
+  reach for private members: `revert`, `open_search`, `close_search`,
+  `goto_line`, `command_palette`, `show_help`, `toggle_diff`,
+  `toggle_read_only`, `toggle_gutter`, `change_font_size`, `set_language`,
+  `choose_language`, plus a `search_open` read accessor.
+- `save_path` prop: seeds the save target on mount **without** reading from
+  disk, so the content passed in `value` is preserved and Save writes to a path
+  that need not exist yet. Ignored when `initial_path` is set.
+
+### Notes
+
+- Syntax highlighting applies correctly on first render (verified in 0.2.x).
+  Embedders no longer need the language-toggle workaround that 0.1.x required.
+
 ## [0.1.6] - 2026-03-17
 
 ### Fix

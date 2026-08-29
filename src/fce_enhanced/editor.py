@@ -79,18 +79,35 @@ class EditorHandle:
     """Imperative handle to a mounted :func:`EnhancedCodeEditor` component.
 
     Populated on every render so external callers can drive the editor without
-    a control instance. Coroutine methods (``open_path``, ``save``,
-    ``save_as``, ``close``) are scheduled with ``page.run_task``. Read-only
-    accessors (``value``, ``dirty``, ``current_path``) reflect live state.
+    a control instance. Coroutine actions are scheduled with ``page.run_task``;
+    the rest are plain callables. Read-only accessors (``value``, ``dirty``,
+    ``current_path``, ``search_open``) reflect live state.
     """
 
+    # File operations
     open_path: Any = None
     save: Any = None
     save_as: Any = None
     close: Any = None
+    revert: Any = None
+    # Search
+    open_search: Any = None  # (with_replace: bool = False)
+    close_search: Any = None
+    # Navigation / dialogs
+    goto_line: Any = None
+    command_palette: Any = None
+    show_help: Any = None
+    # Toggles / view
+    toggle_diff: Any = None
+    toggle_read_only: Any = None
+    toggle_gutter: Any = None
+    change_font_size: Any = None  # (delta: int)
+    set_language: Any = None  # (lang: fce.CodeLanguage)
+    choose_language: Any = None  # opens the language picker dialog
     _get_value: Any = None
     _get_dirty: Any = None
     _get_path: Any = None
+    _get_search_open: Any = None
 
     @property
     def value(self) -> str:
@@ -103,6 +120,10 @@ class EditorHandle:
     @property
     def current_path(self) -> str | None:
         return self._get_path() if self._get_path else None
+
+    @property
+    def search_open(self) -> bool:
+        return self._get_search_open() if self._get_search_open else False
 
 
 @dataclass
@@ -137,6 +158,7 @@ def EnhancedCodeEditor(
     on_title_change=None,
     ruff_on_save: bool = False,
     initial_path: str | None = None,
+    save_path: str | None = None,
     handle: EditorHandle | None = None,
     expand: bool = False,
 ) -> ft.Control:
@@ -169,6 +191,9 @@ def EnhancedCodeEditor(
         ruff_on_save: Run ruff check --fix and ruff format on Python files after
             saving. Requires ruff installed. Defaults to False.
         initial_path: File to open automatically on mount (e.g. from argv).
+        save_path: Save target to seed on mount *without* reading from disk, so
+            the content passed in ``value`` is kept and Save writes to this
+            path (which need not exist yet). Ignored if ``initial_path`` is set.
         handle: Optional :class:`EditorHandle` populated with imperative methods.
         expand: Whether the root column should expand to fill its parent.
     """
@@ -600,6 +625,8 @@ def EnhancedCodeEditor(
     def _open_initial():
         if initial_path:
             page.run_task(open_path, initial_path)
+        elif save_path:
+            set_current_path(save_path)
 
     ft.use_effect(_open_initial, [])
 
@@ -610,9 +637,24 @@ def EnhancedCodeEditor(
         handle.save = lambda: page.run_task(_do_save)
         handle.save_as = lambda: page.run_task(_do_save_as)
         handle.close = lambda: page.run_task(_do_close)
+        handle.revert = lambda: page.run_task(_handle_revert)
+        handle.open_search = lambda with_replace=False: _open_search(
+            with_replace=with_replace
+        )
+        handle.close_search = _close_search
+        handle.goto_line = lambda: page.run_task(_handle_goto_line)
+        handle.command_palette = lambda: page.run_task(_open_command_palette)
+        handle.show_help = _show_help
+        handle.toggle_diff = _toggle_diff_pane
+        handle.toggle_read_only = _toggle_read_only
+        handle.toggle_gutter = _toggle_gutter
+        handle.change_font_size = _change_font_size
+        handle.set_language = set_lang
+        handle.choose_language = _handle_language_click
         handle._get_value = lambda: r.text
         handle._get_dirty = lambda: dirty
         handle._get_path = lambda: current_path
+        handle._get_search_open = lambda: search_open
 
     # --- Render ---
 

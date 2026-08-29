@@ -145,3 +145,127 @@ def test_initial_language_reflected_in_editor(render_component):
     tree, _ = render_component(EnhancedCodeEditor, language=fce.CodeLanguage.JAVASCRIPT)
     editor = next(c for c in tree.controls if isinstance(c, fce.CodeEditor))
     assert editor.language == fce.CodeLanguage.JAVASCRIPT
+
+
+def _run_mount_effects(comp):
+    """Run the effects a real mount would run (deps == [])."""
+    from flet.components.hooks.use_effect import EffectHook
+
+    for hook in comp._state.hooks:
+        if isinstance(hook, EffectHook) and hook.deps == []:
+            hook.setup()
+
+
+def _rerender(comp):
+    from flet.components.component import Renderer
+
+    comp._state.hook_cursor = 0
+    return Renderer(comp).render(comp.fn, *comp.args, **comp.kwargs)
+
+
+HANDLE_ACTIONS = [
+    "open_path",
+    "save",
+    "save_as",
+    "close",
+    "revert",
+    "open_search",
+    "close_search",
+    "goto_line",
+    "command_palette",
+    "show_help",
+    "toggle_diff",
+    "toggle_read_only",
+    "toggle_gutter",
+    "change_font_size",
+    "set_language",
+    "choose_language",
+]
+
+
+def test_handle_actions_all_populated(render_component):
+    handle = EditorHandle()
+    render_component(EnhancedCodeEditor, handle=handle)
+    missing = [name for name in HANDLE_ACTIONS if not callable(getattr(handle, name))]
+    assert missing == []
+
+
+def test_handle_search_open_default_false():
+    assert EditorHandle().search_open is False
+
+
+def test_handle_reports_search_open(render_component):
+    handle = EditorHandle()
+    tree, comp = render_component(EnhancedCodeEditor, handle=handle)
+    assert handle.search_open is False
+    handle.open_search(with_replace=True)
+    _rerender(comp)
+    assert handle.search_open is True
+    handle.close_search()
+    _rerender(comp)
+    assert handle.search_open is False
+
+
+def test_handle_change_font_size(render_component):
+    handle = EditorHandle()
+    tree, comp = render_component(EnhancedCodeEditor, handle=handle)
+    editor = next(c for c in tree.controls if isinstance(c, fce.CodeEditor))
+    before = editor.text_style.size
+    handle.change_font_size(2)
+    tree = _rerender(comp)
+    editor = next(c for c in tree.controls if isinstance(c, fce.CodeEditor))
+    assert editor.text_style.size == before + 2
+
+
+def test_handle_set_language(render_component):
+    handle = EditorHandle()
+    tree, comp = render_component(
+        EnhancedCodeEditor, handle=handle, language=fce.CodeLanguage.PLAINTEXT
+    )
+    handle.set_language(fce.CodeLanguage.PYTHON)
+    tree = _rerender(comp)
+    editor = next(c for c in tree.controls if isinstance(c, fce.CodeEditor))
+    assert editor.language == fce.CodeLanguage.PYTHON
+
+
+def test_save_path_seeds_target_without_reading_disk(render_component, tmp_py_file):
+    """save_path sets the save target but keeps the caller's content."""
+    handle = EditorHandle()
+    tree, comp = render_component(
+        EnhancedCodeEditor,
+        handle=handle,
+        value="unsaved override",
+        save_path=str(tmp_py_file),
+    )
+    _run_mount_effects(comp)
+    _rerender(comp)
+    assert handle.current_path == str(tmp_py_file)
+    assert handle.value == "unsaved override"
+    assert tmp_py_file.read_text() == "print('hello')\n"
+
+
+def test_save_path_target_need_not_exist(render_component, tmp_path):
+    handle = EditorHandle()
+    missing = tmp_path / "does-not-exist.py"
+    _tree, comp = render_component(
+        EnhancedCodeEditor, handle=handle, value="x", save_path=str(missing)
+    )
+    _run_mount_effects(comp)
+    _rerender(comp)
+    assert handle.current_path == str(missing)
+
+
+def test_initial_path_wins_over_save_path(render_component, tmp_py_file, tmp_path):
+    """initial_path still loads from disk; save_path is ignored alongside it."""
+    handle = EditorHandle()
+    _tree, comp = render_component(
+        EnhancedCodeEditor,
+        handle=handle,
+        initial_path=str(tmp_py_file),
+        save_path=str(tmp_path / "other.py"),
+    )
+    _run_mount_effects(comp)
+    _rerender(comp)
+    # open_path is scheduled via page.run_task (a MagicMock), so nothing is
+    # loaded here — what matters is that save_path did not seed the target.
+    assert handle.current_path is None
